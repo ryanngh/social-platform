@@ -1,5 +1,6 @@
-package com.ryan.socialplatform.user.entity;
+package com.ryan.socialplatform.auth.entity;
 
+import com.ryan.socialplatform.user.entity.User;
 import com.ryan.socialplatform.user.enums.VerificationTokenType;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
