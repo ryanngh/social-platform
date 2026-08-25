@@ -6,6 +6,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -15,6 +16,9 @@ import java.util.UUID;
 @Setter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class UserCredentials {
+
+    public static final short MAX_FAILED_ATTEMPTS = 5;
+    public static final Duration DEFAULT_LOCK_DURATION = Duration.ofMinutes(15);
 
     @Id
     @Column(name = "user_id", nullable = false)
@@ -59,10 +63,42 @@ public class UserCredentials {
     @Column(name = "phone_verified_at")
     private Instant phoneVerifiedAt;
 
+    @Column(name = "is_deleted", nullable = false)
+    private boolean deleted = false;
+
     public UserCredentials(User user, String phoneNumber, String passwordHash) {
         this.user = user;
         this.userId = user.getId();
         this.phoneNumber = phoneNumber;
         this.passwordHash = passwordHash;
+    }
+
+    public boolean isAccountLocked() {
+        return this.lockedUntil != null && Instant.now().isBefore(this.lockedUntil);
+    }
+
+    public void recordFailedLogin(int maxAttempts, Duration lockDuration) {
+        this.failedLoginCount++;
+        if (this.failedLoginCount >= maxAttempts) {
+            this.lockedUntil = Instant.now().plus(lockDuration);
+        }
+    }
+
+    public void recordFailedLogin() {
+        recordFailedLogin(MAX_FAILED_ATTEMPTS, DEFAULT_LOCK_DURATION);
+    }
+
+    public void recordSuccessfulLogin() {
+        this.failedLoginCount = 0;
+        this.lockedUntil = null;
+    }
+
+    public void unlock() {
+        this.failedLoginCount = 0;
+        this.lockedUntil = null;
+    }
+
+    public boolean canLogin() {
+        return !this.deleted && !isAccountLocked();
     }
 }
