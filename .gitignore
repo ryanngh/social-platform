@@ -7,6 +7,8 @@ bin/
 *.war
 *.ear
 *.nar
+*.rar
+*.zip
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
