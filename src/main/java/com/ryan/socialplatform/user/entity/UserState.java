@@ -49,7 +49,6 @@ public class UserState {
 
     public UserState(User user) {
         this.user = user;
-        this.userId = user.getId();
     }
 
     @PrePersist

@@ -61,7 +61,6 @@ public class UserProfile {
 
     public UserProfile(User user, String firstName, String lastName) {
         this.user = user;
-        this.userId = user.getId();
         this.firstName = firstName;
         this.lastName = lastName;
     }

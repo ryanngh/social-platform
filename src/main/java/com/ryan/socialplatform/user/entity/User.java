@@ -48,4 +48,8 @@ public class User {
     protected void onUpdate() {
         this.updatedAt = Instant.now();
     }
+
+    public static User create() {
+        return new User();
+    }
 }

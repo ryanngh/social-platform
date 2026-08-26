@@ -18,7 +18,8 @@ import java.util.UUID;
 public class UserCredentials {
 
     public static final short MAX_FAILED_ATTEMPTS = 5;
-    public static final Duration DEFAULT_LOCK_DURATION = Duration.ofMinutes(15);
+    public static final Duration DEFAULT_LOCK_DURATION =
+            Duration.ofMinutes(15);
 
     @Id
     @Column(name = "user_id", nullable = false)
@@ -29,14 +30,16 @@ public class UserCredentials {
     @JoinColumn(
             name = "user_id",
             nullable = false,
-            foreignKey = @ForeignKey(name = "fk_user_credentials_user_id")
+            foreignKey = @ForeignKey(
+                    name = "fk_user_credentials_user_id"
+            )
     )
     private User user;
 
-    @Column(length = 255, unique = true)
+    @Column(name = "email", length = 255)
     private String email;
 
-    @Column(name = "phone_number", nullable = false, length = 15, unique = true)
+    @Column(name = "phone_number", nullable = false, length = 20)
     private String phoneNumber;
 
     @Column(name = "password_hash", nullable = false, columnDefinition = "TEXT")
@@ -66,26 +69,38 @@ public class UserCredentials {
     @Column(name = "is_deleted", nullable = false)
     private boolean deleted = false;
 
-    public UserCredentials(User user, String phoneNumber, String passwordHash) {
+    public UserCredentials(
+            User user,
+            String phoneNumber,
+            String passwordHash
+    ) {
         this.user = user;
-        this.userId = user.getId();
         this.phoneNumber = phoneNumber;
         this.passwordHash = passwordHash;
     }
 
     public boolean isAccountLocked() {
-        return this.lockedUntil != null && Instant.now().isBefore(this.lockedUntil);
+        return lockedUntil != null
+                && Instant.now().isBefore(lockedUntil);
     }
 
-    public void recordFailedLogin(int maxAttempts, Duration lockDuration) {
+    public void recordFailedLogin(
+            int maxAttempts,
+            Duration lockDuration
+    ) {
         this.failedLoginCount++;
+
         if (this.failedLoginCount >= maxAttempts) {
-            this.lockedUntil = Instant.now().plus(lockDuration);
+            this.lockedUntil =
+                    Instant.now().plus(lockDuration);
         }
     }
 
     public void recordFailedLogin() {
-        recordFailedLogin(MAX_FAILED_ATTEMPTS, DEFAULT_LOCK_DURATION);
+        recordFailedLogin(
+                MAX_FAILED_ATTEMPTS,
+                DEFAULT_LOCK_DURATION
+        );
     }
 
     public void recordSuccessfulLogin() {
