@@ -14,4 +14,7 @@ public interface UserCredentialsRepository extends JpaRepository<UserCredentials
                 WHERE c.email = :identifier OR c.phoneNumber = :identifier
             """)
     Optional<UserCredentials> findByIdentifier(@Param("identifier") String identifier);
+
+    boolean existsByEmail(String email);
+    boolean existsByPhoneNumber(String phoneNumber);
 }
