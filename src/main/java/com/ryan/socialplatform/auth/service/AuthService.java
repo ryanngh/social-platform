@@ -148,6 +148,11 @@ public class AuthService {
                 });
     }
 
+    @Transactional
+    public void logoutAll(UUID userId) {
+        userSessionRepository.revokeAllByUserId(userId, Instant.now());
+    }
+
     private TokenResponse issueTokens(UUID userId, List<String> roles) {
         String accessToken = jwtService.generateAccessToken(userId, roles);
         String rawRefreshToken = refreshTokenService.generateRawToken();

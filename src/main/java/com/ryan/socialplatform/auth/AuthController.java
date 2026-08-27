@@ -44,4 +44,12 @@ public class AuthController {
         authService.logout(request);
         return ResponseEntity.noContent().build();
     }
+
+    @PostMapping("/logout-all")
+    public ResponseEntity<Void> logoutAll(@org.springframework.security.core.annotation.AuthenticationPrincipal java.util.UUID userId) {
+        if (userId != null) {
+            authService.logoutAll(userId);
+        }
+        return ResponseEntity.noContent().build();
+    }
 }

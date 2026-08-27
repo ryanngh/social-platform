@@ -11,7 +11,8 @@ import java.util.UUID;
 public interface UserCredentialsRepository extends JpaRepository<UserCredentials, UUID> {
     @Query("""
                 SELECT c FROM UserCredentials c
-                WHERE c.email = :identifier OR c.phoneNumber = :identifier
+                WHERE (c.email = :identifier OR c.phoneNumber = :identifier)
+                  AND c.deleted = false
             """)
     Optional<UserCredentials> findByIdentifier(@Param("identifier") String identifier);
 
