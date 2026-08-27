@@ -13,6 +13,7 @@ public record UserResponse(
         UUID id,
         String firstName,
         String lastName,
+        String fullName,
         String avatarUrl,
         String bannerUrl,
         String bio,
@@ -23,18 +24,22 @@ public record UserResponse(
         String pronunciation,
         Status status,
         boolean isVerified,
+        boolean isOwner,
         Instant createdAt,
         Instant updatedAt
 ) {
-    public String fullName() {
-        return firstName != null ? (firstName + " " + lastName).trim() : null;
-    }
+    public static UserResponse from(User user, UserProfile profile, boolean isOwner) {
+        String firstName = profile != null ? profile.getFirstName() : null;
+        String lastName = profile != null ? profile.getLastName() : null;
+        String fullName = (firstName != null && lastName != null)
+                ? (firstName + " " + lastName).trim()
+                : (firstName != null ? firstName : lastName);
 
-    public static UserResponse from(User user, UserProfile profile) {
         return new UserResponse(
                 user.getId(),
-                profile != null ? profile.getFirstName() : null,
-                profile != null ? profile.getLastName() : null,
+                firstName,
+                lastName,
+                fullName,
                 profile != null ? profile.getAvatarUrl() : null,
                 profile != null ? profile.getBannerUrl() : null,
                 profile != null ? profile.getBio() : null,
@@ -45,8 +50,13 @@ public record UserResponse(
                 profile != null ? profile.getPronunciation() : null,
                 user.getStatus(),
                 user.isVerified(),
+                isOwner,
                 user.getCreatedAt(),
                 user.getUpdatedAt()
         );
+    }
+
+    public static UserResponse from(User user, UserProfile profile) {
+        return from(user, profile, false);
     }
 }
