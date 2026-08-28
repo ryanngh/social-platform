@@ -4,22 +4,30 @@ server:
 spring:
   application:
     name: socialplatform
-
   datasource:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:social_network}
     username: ${POSTGRES_USER:social_app}
     password: ${POSTGRES_PASSWORD:CHANGE_ME}
-
   jpa:
     hibernate:
       ddl-auto: validate
     open-in-view: false
-
   flyway:
     enabled: true
+  servlet:
+    multipart:
+      max-file-size: 25MB
+      max-request-size: 25MB
 
 app:
   jwt:
     secret: ${JWT_SECRET:CHANGE_ME_use_openssl_rand_base64_32}
     access-token-expiration-ms: ${JWT_ACCESS_EXPIRATION_MS:900000}      # 15 phút
     refresh-token-expiration-days: ${JWT_REFRESH_EXPIRATION_DAYS:30}
+
+
+minio:
+  endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+  access-key: ${MINIO_ROOT_USER:minioadmin}
+  secret-key: ${MINIO_ROOT_PASSWORD:minioadmin123}
+  bucket: ${MINIO_BUCKET_NAME:social-media}

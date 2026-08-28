@@ -5,10 +5,12 @@ import com.ryan.socialplatform.user.dto.UserProfileUpdateRequest;
 import com.ryan.socialplatform.user.dto.UserResponse;
 import com.ryan.socialplatform.user.service.UserService;
 import jakarta.validation.Valid;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.UUID;
 
@@ -96,5 +98,32 @@ public class UserController {
     @PreAuthorize("hasAnyRole('ADMIN', 'MODERATOR')")
     public ResponseEntity<UserAccountResponse> reactivateUser(@PathVariable UUID id) {
         return ResponseEntity.ok(userService.reactivateUser(id));
+    }
+
+
+    /**
+     * Upload / Cập nhật ảnh đại diện (Avatar)
+     * Request: multipart/form-data với field name là "file"
+     */
+    @PostMapping(value = "/me/avatar", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<UserResponse> uploadAvatar(
+            @AuthenticationPrincipal UUID userId,
+            @RequestParam("file") MultipartFile file
+    ) {
+        UserResponse response = userService.updateAvatar(userId, file);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Upload / Cập nhật ảnh bìa (Banner)
+     * Request: multipart/form-data với field name là "file"
+     */
+    @PostMapping(value = "/me/banner", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<UserResponse> uploadBanner(
+            @AuthenticationPrincipal UUID userId,
+            @RequestParam("file") MultipartFile file
+    ) {
+        UserResponse response = userService.updateBanner(userId, file);
+        return ResponseEntity.ok(response);
     }
 }

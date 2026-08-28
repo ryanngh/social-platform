@@ -2,6 +2,7 @@ package com.ryan.socialplatform.user.service;
 
 import com.ryan.socialplatform.auth.repository.UserCredentialsRepository;
 import com.ryan.socialplatform.auth.repository.UserSessionRepository;
+import com.ryan.socialplatform.storage.StorageService;
 import com.ryan.socialplatform.user.dto.UserAccountResponse;
 import com.ryan.socialplatform.user.dto.UserProfileUpdateRequest;
 import com.ryan.socialplatform.user.dto.UserResponse;
@@ -15,6 +16,7 @@ import com.ryan.socialplatform.user.repository.UserProfileRepository;
 import com.ryan.socialplatform.user.repository.UserRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.util.List;
@@ -29,16 +31,20 @@ public class UserService {
     private final UserAppRoleRepository userAppRoleRepository;
     private final UserSessionRepository userSessionRepository;
 
+    private final StorageService storageService;
+
     public UserService(UserRepository userRepository,
                        UserProfileRepository userProfileRepository,
                        UserCredentialsRepository userCredentialsRepository,
                        UserAppRoleRepository userAppRoleRepository,
-                       UserSessionRepository userSessionRepository) {
+                       UserSessionRepository userSessionRepository,
+                       StorageService storageService) {
         this.userRepository = userRepository;
         this.userProfileRepository = userProfileRepository;
         this.userCredentialsRepository = userCredentialsRepository;
         this.userAppRoleRepository = userAppRoleRepository;
         this.userSessionRepository = userSessionRepository;
+        this.storageService = storageService;
     }
 
     @Transactional(readOnly = true)
@@ -194,5 +200,95 @@ public class UserService {
         userRepository.save(user);
 
         return getAccountInfo(targetUserId);
+    }
+
+    /**
+     * Cập nhật Avatar người dùng:
+     * - Validate file ảnh
+     * - Upload lên MinIO folder "avatars"
+     * - Xóa avatar cũ trên MinIO (nếu có)
+     * - Cập nhật database và trả về UserResponse mới nhất
+     */
+    @Transactional
+    public UserResponse updateAvatar(UUID userId, MultipartFile file) {
+        validateImageFile(file);
+
+        UserProfile profile = userProfileRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException(userId));
+
+        if (profile.getUser().getStatus() == Status.DELETED) {
+            throw new UserNotFoundException(userId);
+        }
+
+        String oldAvatarUrl = profile.getAvatarUrl();
+
+        // 1. Upload ảnh mới lên MinIO
+        String newAvatarUrl = storageService.uploadFile("avatars", file);
+
+        // 2. Cập nhật vào DB
+        profile.setAvatarUrl(newAvatarUrl);
+        UserProfile savedProfile = userProfileRepository.save(profile);
+
+        // 3. Xóa avatar cũ khỏi MinIO để dọn rác
+        if (oldAvatarUrl != null && !oldAvatarUrl.isBlank()) {
+            storageService.deleteFile(oldAvatarUrl);
+        }
+
+        return UserResponse.from(profile.getUser(), savedProfile, true);
+    }
+
+    /**
+     * Cập nhật Banner (Ảnh bìa) người dùng
+     */
+    @Transactional
+    public UserResponse updateBanner(UUID userId, MultipartFile file) {
+        validateImageFile(file);
+
+        UserProfile profile = userProfileRepository.findById(userId)
+                .orElseThrow(() -> new UserNotFoundException(userId));
+
+        if (profile.getUser().getStatus() == Status.DELETED) {
+            throw new UserNotFoundException(userId);
+        }
+
+        String oldBannerUrl = profile.getBannerUrl();
+
+        // 1. Upload ảnh mới lên MinIO
+        String newBannerUrl = storageService.uploadFile("banners", file);
+
+        // 2. Cập nhật vào DB
+        profile.setBannerUrl(newBannerUrl);
+        UserProfile savedProfile = userProfileRepository.save(profile);
+
+        // 3. Xóa banner cũ khỏi MinIO
+        if (oldBannerUrl != null && !oldBannerUrl.isBlank()) {
+            storageService.deleteFile(oldBannerUrl);
+        }
+
+        return UserResponse.from(profile.getUser(), savedProfile, true);
+    }
+
+
+    private void validateImageFile(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("File upload must not be empty.");
+        }
+
+        // Giới hạn dung lượng tối đa 25MB
+        long maxSizeBytes = 25 * 1024 * 1024;
+        if (file.getSize() > maxSizeBytes) {
+            throw new IllegalArgumentException("File size exceeds the allowed limit (maximum 25 MB)");
+        }
+
+        // Chỉ cho phép định dạng ảnh
+        String contentType = file.getContentType();
+        if (contentType == null || !(
+                contentType.equalsIgnoreCase("image/jpeg") ||
+                        contentType.equalsIgnoreCase("image/png") ||
+                        contentType.equalsIgnoreCase("image/webp") ||
+                        contentType.equalsIgnoreCase("image/gif")
+        )) {
+            throw new IllegalArgumentException("Only image files are allowed (JPEG, PNG, WEBP, GIF)");
+        }
     }
 }
