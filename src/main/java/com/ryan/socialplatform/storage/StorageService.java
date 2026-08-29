@@ -29,7 +29,7 @@ public class StorageService {
                 minioClient.makeBucket(
                         MakeBucketArgs.builder().bucket(props.getBucket()).build()
                 );
-                // Set policy cho phép đọc công khai (Public Read) để hiển thị ảnh
+                // Set policy cho phép Public Read để hiển thị ảnh
                 String policy = """
                 {
                   "Version": "2012-10-17",
@@ -60,7 +60,7 @@ public class StorageService {
      * @param file File tải lên từ client
      * @return URL truy cập file công khai
      */
-    public String uploadFile(String folder ,MultipartFile file) {
+    public String uploadFile(String folder, UUID byUser,MultipartFile file) {
         if (file.isEmpty()) {
             throw new IllegalArgumentException("File cannot null!");
         }
@@ -69,22 +69,42 @@ public class StorageService {
         if (originalFilename != null && originalFilename.contains(".")) {
             extension = originalFilename.substring(originalFilename.lastIndexOf("."));
         }
-        // Tên file duy nhất: folder/UUID.ext (vd: avatars/123e4567-e89b-12d3.jpg)
-        String objectName = folder + "/" + UUID.randomUUID() + extension;
+        // Tên file duy nhất: folder/{ByUserId}/UUID.ext (vd: avatars/123e4567-e89b-12d3.jpg)
+        String objectName = folder + "/" + byUser + "/" + UUID.randomUUID() + extension;
+        // Xác định Content-Type nếu client gửi lên rỗng hoặc chung chung (octet-stream)
+        String contentType = file.getContentType();
+        if (contentType == null || contentType.isBlank() || contentType.equalsIgnoreCase("application/octet-stream")) {
+            contentType = determineContentType(extension);
+        }
+
         try (InputStream is = file.getInputStream()) {
             minioClient.putObject(
                     PutObjectArgs.builder()
                             .bucket(props.getBucket())
                             .object(objectName)
                             .stream(is, file.getSize(), -1L)
-                            .contentType(file.getContentType())
+                            .contentType(contentType)
                             .build()
             );
-            // Trả về full URL: http://localhost:9000/social-platform/avatars/uuid.jpg
-            return String.format("%s/%s/%s", props.getEndpoint(), props.getBucket(), objectName);
+            // Trả về objectName (format: folder/{byUser}/{UUID}.ext)
+            return objectName;
         } catch (Exception e) {
             throw new RuntimeException("Lỗi khi upload file lên MinIO: " + e.getMessage(), e);
         }
+    }
+
+    private String determineContentType(String extension) {
+        if (extension == null || extension.isBlank()) {
+            return "application/octet-stream";
+        }
+        String cleanExt = extension.startsWith(".") ? extension.substring(1).toLowerCase() : extension.toLowerCase();
+        return switch (cleanExt) {
+            case "jpg", "jpeg" -> "image/jpeg";
+            case "png" -> "image/png";
+            case "webp" -> "image/webp";
+            case "gif" -> "image/gif";
+            default -> "application/octet-stream";
+        };
     }
     /**
      * Xóa file trên MinIO theo URL hoặc Object Name
@@ -94,9 +114,9 @@ public class StorageService {
             return;
         }
         try {
-            // Tách objectName từ URL
+            // Tách objectName nếu là full URL, hoặc giữ nguyên nếu là objectName
             String prefix = props.getEndpoint() + "/" + props.getBucket() + "/";
-            String objectName = fileUrl.replace(prefix, "");
+            String objectName = fileUrl.startsWith(prefix) ? fileUrl.substring(prefix.length()) : fileUrl;
             minioClient.removeObject(
                     RemoveObjectArgs.builder()
                             .bucket(props.getBucket())

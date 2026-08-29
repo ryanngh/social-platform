@@ -17,11 +17,9 @@ public record UserProfileUpdateRequest(
         String lastName,
 
         @Size(max = 2048, message = "Avatar URL must not exceed 2048 characters")
-        @URL(message = "Avatar URL must be a valid URL")
         String avatarUrl,
 
         @Size(max = 2048, message = "Banner URL must not exceed 2048 characters")
-        @URL(message = "Banner URL must be a valid URL")
         String bannerUrl,
 
         @Size(max = 500, message = "Bio must not exceed 500 characters")

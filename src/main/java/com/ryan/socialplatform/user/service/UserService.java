@@ -20,6 +20,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 @Service
@@ -223,7 +224,7 @@ public class UserService {
         String oldAvatarUrl = profile.getAvatarUrl();
 
         // 1. Upload ảnh mới lên MinIO
-        String newAvatarUrl = storageService.uploadFile("avatars", file);
+        String newAvatarUrl = storageService.uploadFile("avatars", userId, file);
 
         // 2. Cập nhật vào DB
         profile.setAvatarUrl(newAvatarUrl);
@@ -254,7 +255,7 @@ public class UserService {
         String oldBannerUrl = profile.getBannerUrl();
 
         // 1. Upload ảnh mới lên MinIO
-        String newBannerUrl = storageService.uploadFile("banners", file);
+        String newBannerUrl = storageService.uploadFile("banners", userId, file);
 
         // 2. Cập nhật vào DB
         profile.setBannerUrl(newBannerUrl);
@@ -269,6 +270,17 @@ public class UserService {
     }
 
 
+    private static final Set<String> ALLOWED_IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp", "gif");
+    private static final Set<String> ALLOWED_IMAGE_MIME_TYPES = Set.of(
+            "image/jpeg",
+            "image/png",
+            "image/webp",
+            "image/gif",
+            "image/jpg",
+            "image/pjpeg",
+            "image/x-png"
+    );
+
     private void validateImageFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("File upload must not be empty.");
@@ -280,14 +292,27 @@ public class UserService {
             throw new IllegalArgumentException("File size exceeds the allowed limit (maximum 25 MB)");
         }
 
-        // Chỉ cho phép định dạng ảnh
+        // 1. Kiểm tra extension từ file name
+        String originalFilename = file.getOriginalFilename();
+        String extension = "";
+        if (originalFilename != null && originalFilename.contains(".")) {
+            extension = originalFilename.substring(originalFilename.lastIndexOf(".") + 1).toLowerCase();
+        }
+
+        // 2. Kiểm tra Content-Type
         String contentType = file.getContentType();
-        if (contentType == null || !(
-                contentType.equalsIgnoreCase("image/jpeg") ||
-                        contentType.equalsIgnoreCase("image/png") ||
-                        contentType.equalsIgnoreCase("image/webp") ||
-                        contentType.equalsIgnoreCase("image/gif")
-        )) {
+        if (contentType != null && contentType.contains(";")) {
+            contentType = contentType.split(";")[0].trim();
+        }
+
+        boolean isValidMime = contentType != null && (
+                ALLOWED_IMAGE_MIME_TYPES.contains(contentType.toLowerCase()) ||
+                contentType.toLowerCase().startsWith("image/")
+        );
+        boolean isValidExt = ALLOWED_IMAGE_EXTENSIONS.contains(extension);
+
+        // Cho phép nếu đuôi file hợp lệ HOẶC MIME type hợp lệ
+        if (!isValidExt && !isValidMime) {
             throw new IllegalArgumentException("Only image files are allowed (JPEG, PNG, WEBP, GIF)");
         }
     }
