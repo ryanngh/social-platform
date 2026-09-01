@@ -43,11 +43,13 @@ public class Friendship {
 
     /**
      * Tạo Friendship với user_id_1 < user_id_2 (khớp với CHECK constraint ở DB).
+     * Lưu ý: Java UUID.compareTo() so sánh signed long, trong khi PostgreSQL so sánh unsigned / hex string.
+     * Vì vậy cần so sánh theo toString() để đảm bảo user_id_1 < user_id_2 theo chuẩn PostgreSQL.
      */
     public Friendship(User a, User b) {
         Objects.requireNonNull(a, "User A must not be null");
         Objects.requireNonNull(b, "User B must not be null");
-        if (a.getId().compareTo(b.getId()) < 0) {
+        if (a.getId().toString().compareTo(b.getId().toString()) < 0) {
             this.user1 = a;
             this.user2 = b;
         } else {
