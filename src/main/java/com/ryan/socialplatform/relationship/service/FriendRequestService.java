@@ -77,7 +77,7 @@ public class FriendRequestService {
         } else {
             FriendRequest existing = existingOpt.get();
             switch (existing.getStatus()) {
-                case ACCEPTED -> throw new IllegalStateException("You are already friends with this user");
+               //  case ACCEPTED -> throw new IllegalStateException("You are already friends with this user"); -> Case này bị sai
                 case PENDING -> {
                     if (existing.getSender().getId().equals(currentUserId)) {
                         throw new IllegalStateException("You have already sent a friend request");
@@ -85,7 +85,7 @@ public class FriendRequestService {
                         throw new IllegalStateException("This user already sent you a friend request. Please respond to it.");
                     }
                 }
-                case DECLINED, CANCELLED -> {
+                case ACCEPTED, DECLINED, CANCELLED -> {
                     existing.resend(sender, receiver);
                     request = existing;
                 }
