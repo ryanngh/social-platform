@@ -115,6 +115,10 @@ public class AuthService {
         if (userCredentialsRepository.existsByPhoneNumber(request.phoneNumber())) {
             throw new AccountAlreadyExistsException("Phone number already in use");
         }
+        if (request.username() != null && !request.username().isBlank()
+                && userProfileRepository.existsByUsernameIgnoreCase(request.username().trim())) {
+            throw new AccountAlreadyExistsException("Username already in use");
+        }
 
         User user = userRepository.saveAndFlush(User.create());
 
@@ -132,7 +136,10 @@ public class AuthService {
             throw new AccountAlreadyExistsException("Email or phone number already in use");
         }
 
-        userProfileRepository.save(new UserProfile(user, request.firstName(), request.lastName()));
+        String username = (request.username() != null && !request.username().isBlank())
+                ? request.username().trim()
+                : null;
+        userProfileRepository.save(new UserProfile(user, request.firstName(), request.lastName(), username));
         userAppRoleRepository.save(new UserAppRole(user, AppRole.USER, null));
 
         return issueTokens(user.getId(), List.of(AppRole.USER.name()));

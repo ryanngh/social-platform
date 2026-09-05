@@ -16,7 +16,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     @Query("""
                 SELECT new com.ryan.socialplatform.user.dto.UserResponse(
-                    u.id, p.firstName, p.lastName,
+                    u.id, p.username, p.firstName, p.lastName,
                     TRIM(CONCAT(COALESCE(p.firstName, ''), ' ', COALESCE(p.lastName, ''))),
                     p.avatarUrl, p.bannerUrl, p.bio,
                     p.pronouns, p.location, p.websiteUrl, p.birthday, p.pronunciation,
@@ -33,5 +33,24 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     default Optional<UserResponse> findProfileById(UUID userId) {
         return findProfileByIdAndViewer(userId, null);
     }
-                                                                    
+
+    @Query("""
+                SELECT new com.ryan.socialplatform.user.dto.UserResponse(
+                    u.id, p.username, p.firstName, p.lastName,
+                    TRIM(CONCAT(COALESCE(p.firstName, ''), ' ', COALESCE(p.lastName, ''))),
+                    p.avatarUrl, p.bannerUrl, p.bio,
+                    p.pronouns, p.location, p.websiteUrl, p.birthday, p.pronunciation,
+                    u.status, u.verified,
+                    (CASE WHEN :viewerId IS NOT NULL AND u.id = :viewerId THEN true ELSE false END),
+                    u.createdAt, u.updatedAt
+                )
+                FROM User u
+                JOIN UserProfile p ON p.userId = u.id
+                WHERE LOWER(p.username) = LOWER(:username)
+            """)
+    Optional<UserResponse> findProfileByUsernameAndViewer(@Param("username") String username, @Param("viewerId") UUID viewerId);
+
+    default Optional<UserResponse> findProfileByUsername(String username) {
+        return findProfileByUsernameAndViewer(username, null);
+    }
 }

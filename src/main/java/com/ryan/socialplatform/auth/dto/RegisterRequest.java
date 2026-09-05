@@ -2,6 +2,7 @@ package com.ryan.socialplatform.auth.dto;
 
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
 public record RegisterRequest(
@@ -22,6 +23,13 @@ public record RegisterRequest(
 
         @NotBlank(message = "Last name must not be blank")
         @Size(max = 50, message = "Last name must not exceed 50 characters")
-        String lastName
+        String lastName,
+
+        @Size(min = 3, max = 30, message = "Username must be between 3 and 30 characters")
+        @Pattern(regexp = "^[a-zA-Z0-9_.]+$", message = "Username can only contain alphanumeric characters, underscores and dots")
+        String username
 ) {
+    public RegisterRequest(String phoneNumber, String email, String password, String firstName, String lastName) {
+        this(phoneNumber, email, password, firstName, lastName, null);
+    }
 }

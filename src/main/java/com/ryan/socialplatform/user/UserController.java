@@ -33,14 +33,19 @@ public class UserController {
     }
 
     /**
-     * Xem hồ sơ theo ID (của người khác hoặc của mình)
+     * Xem hồ sơ theo ID hoặc Username
      */
-    @GetMapping("/{id}")
+    @GetMapping("/{identifier}")
     public ResponseEntity<UserResponse> getProfile(
-            @PathVariable UUID id,
+            @PathVariable String identifier,
             @AuthenticationPrincipal UUID viewerId
     ) {
-        return ResponseEntity.ok(userService.getProfile(id, viewerId));
+        try {
+            UUID id = UUID.fromString(identifier);
+            return ResponseEntity.ok(userService.getProfile(id, viewerId));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.ok(userService.getProfileByUsername(identifier, viewerId));
+        }
     }
 
     /**

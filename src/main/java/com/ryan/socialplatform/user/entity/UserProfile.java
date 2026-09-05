@@ -29,6 +29,9 @@ public class UserProfile {
     )
     private User user;
 
+    @Column(name = "username", length = 50, unique = true)
+    private String username;
+
     @Column(name = "first_name", nullable = false, length = 50)
     private String firstName;
 
@@ -60,9 +63,14 @@ public class UserProfile {
     private String pronunciation;
 
     public UserProfile(User user, String firstName, String lastName) {
+        this(user, firstName, lastName, null);
+    }
+
+    public UserProfile(User user, String firstName, String lastName, String username) {
         this.user = user;
         this.firstName = firstName;
         this.lastName = lastName;
+        this.username = username;
     }
 
 }

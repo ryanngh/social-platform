@@ -1,5 +1,6 @@
 package com.ryan.socialplatform.user.service;
 
+import com.ryan.socialplatform.auth.exceptions.AccountAlreadyExistsException;
 import com.ryan.socialplatform.auth.repository.UserCredentialsRepository;
 import com.ryan.socialplatform.auth.repository.UserSessionRepository;
 import com.ryan.socialplatform.storage.StorageService;
@@ -66,6 +67,26 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
+    public UserResponse getProfileByUsername(String username, UUID viewerId) {
+        if (username == null || username.isBlank()) {
+            throw new IllegalArgumentException("Username must not be empty");
+        }
+        UserResponse response = userRepository.findProfileByUsernameAndViewer(username.trim(), viewerId)
+                .orElseThrow(() -> new UserNotFoundException("User not found with username: " + username));
+
+        if (response.status() == Status.DELETED) {
+            throw new UserNotFoundException("User not found with username: " + username);
+        }
+
+        return response;
+    }
+
+    @Transactional(readOnly = true)
+    public UserResponse getProfileByUsername(String username) {
+        return getProfileByUsername(username, null);
+    }
+
+    @Transactional(readOnly = true)
     public UserResponse getMyProfile(UUID currentUserId) {
         return getProfile(currentUserId, currentUserId);
     }
@@ -82,6 +103,19 @@ public class UserService {
         // Bắt buộc — @NotBlank đảm bảo luôn có giá trị, set thẳng an toàn
         profile.setFirstName(request.firstName());
         profile.setLastName(request.lastName());
+
+        // Username
+        if (request.username() != null) {
+            String newUsername = request.username().trim();
+            if (newUsername.isEmpty()) {
+                profile.setUsername(null);
+            } else if (!newUsername.equalsIgnoreCase(profile.getUsername())) {
+                if (userProfileRepository.existsByUsernameIgnoreCase(newUsername)) {
+                    throw new AccountAlreadyExistsException("Username already taken");
+                }
+                profile.setUsername(newUsername);
+            }
+        }
 
         // Optional — chỉ ghi đè khi client thật sự gửi giá trị,
         // tránh null vô tình xoá mất dữ liệu cũ (partial update)

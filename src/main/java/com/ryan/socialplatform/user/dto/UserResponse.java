@@ -11,6 +11,7 @@ import java.util.UUID;
 
 public record UserResponse(
         UUID id,
+        String username,
         String firstName,
         String lastName,
         String fullName,
@@ -37,6 +38,7 @@ public record UserResponse(
 
         return new UserResponse(
                 user.getId(),
+                profile != null ? profile.getUsername() : null,
                 firstName,
                 lastName,
                 fullName,

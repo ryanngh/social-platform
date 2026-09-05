@@ -6,6 +6,7 @@ import java.util.UUID;
 
 public record UserSummaryResponse(
         UUID id,
+        String username,
         String firstName,
         String lastName,
         String fullName,
@@ -23,6 +24,7 @@ public record UserSummaryResponse(
 
         return new UserSummaryResponse(
                 profile.getUserId(),
+                profile.getUsername(),
                 firstName,
                 lastName,
                 fullName,

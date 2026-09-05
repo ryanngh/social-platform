@@ -2,12 +2,17 @@ package com.ryan.socialplatform.user.dto;
 
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Past;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import org.hibernate.validator.constraints.URL;
 
 import java.time.LocalDate;
 
 public record UserProfileUpdateRequest(
+        @Size(min = 3, max = 30, message = "Username must be between 3 and 30 characters")
+        @Pattern(regexp = "^[a-zA-Z0-9_.]+$", message = "Username can only contain alphanumeric characters, underscores and dots")
+        String username,
+
         @NotBlank(message = "First name must not be blank")
         @Size(max = 50, message = "First name must not exceed 50 characters")
         String firstName,
