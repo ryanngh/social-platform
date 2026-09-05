@@ -15,7 +15,7 @@ import java.util.UUID;
 @Getter
 @Setter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class PostHashtag {
+public class PostHashTag {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -35,12 +35,12 @@ public class PostHashtag {
             nullable = false,
             foreignKey = @ForeignKey(name = "fk_post_hashtags_hashtag")
     )
-    private Hashtag hashtag;
+    private HashTag hashtag;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
-    public PostHashtag(Post post, Hashtag hashtag) {
+    public PostHashTag(Post post, HashTag hashtag) {
         this.post = Objects.requireNonNull(post, "Post must not be null");
         this.hashtag = Objects.requireNonNull(hashtag, "Hashtag must not be null");
     }

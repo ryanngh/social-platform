@@ -15,7 +15,7 @@ import java.util.UUID;
 @Getter
 @Setter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
-public class Hashtag {
+public class HashTag {
 
     @Id
     @GeneratedValue(strategy = GenerationType.UUID)
@@ -27,7 +27,7 @@ public class Hashtag {
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 
-    public Hashtag(String tag) {
+    public HashTag(String tag) {
         this.tag = Objects.requireNonNull(tag, "Tag must not be null");
     }
 
