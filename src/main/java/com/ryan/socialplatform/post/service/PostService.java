@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
@@ -30,7 +31,6 @@ public class PostService {
     private final UserProfileRepository userProfileRepository;
     private final UserBlockRepository userBlockRepository;
     private final FriendshipRepository friendshipRepository;
-    ;
 
     public PostService(PostRepository postRepository,
                        PostMediaRepository postMediaRepository,
@@ -179,39 +179,13 @@ public class PostService {
             }
         }
 
-        UserProfile authorProfile = userProfileRepository.findById(authorId).orElse(null);
-        // MAP MEDIA
-        List<PostMediaResponse> mediaResponses = postMediaRepository
-                .findAllByPostIdOrderByDisplayOrderAsc(postId)
-                .stream()
-                .map(PostMediaResponse::from) // Dùng hàm tiện ích có sẵn trong PostMediaResponse
-                .toList();
-        // hashtag
-        List<String> hashtags = postHashtagRepository.findHashtagNamesByPostId(postId);
-
-
-        // MAP TAGUSER
-        List<UUID> taggedUserIds = postTagRepository.findTaggedUserIdsByPostId(postId);
-        List<UserSummaryResponse> taggedUsers = taggedUserIds.isEmpty()
-                ? List.of()
-                : userProfileRepository.findAllById(taggedUserIds).stream()
-                .map(UserSummaryResponse::from)
-                .toList();
-
-        return PostResponse.of(
-                post,
-                UserSummaryResponse.from(authorProfile),
-                mediaResponses,
-                hashtags,
-                taggedUsers,
-                0L,        // reactionCount (tạm thời để 0)
-                0L         // commentCount (tạm thời để 0)
-        );
+        return toPostResponse(post);
     }
 
     /**
      * Newfeeds
      */
+    @Transactional(readOnly = true)
     public Slice<PostResponse> newFeeds(UUID userId, Pageable pageable) {
         //TODO newFeeds
         return null;
@@ -220,6 +194,7 @@ public class PostService {
     /**
      * get user posts (profile)
      */
+    @Transactional(readOnly = true)
     public Slice<PostResponse> getUserPost(UUID targetUserId, UUID currentUserId, Pageable pageable) {
         // check targetUserId
         if (!userProfileRepository.existsById(targetUserId)) {
@@ -253,9 +228,83 @@ public class PostService {
             }
         }
         Slice<Post> postsSlice = postRepository.findProfilePosts(targetUserId, allowedVisibilities, pageable);
-        return postsSlice.map(this::toPostResponse);
+        return toPostResponseSlice(postsSlice);
+    }
 
+    /**
+     * Helper tối ưu hiệu năng: Batch fetch tất cả dữ liệu liên quan (Media, Hashtag, Tag, Author)
+     * Triệt tiêu hoàn toàn vấn đề N+1 Query khi tải danh sách bài viết.
+     */
+    private Slice<PostResponse> toPostResponseSlice(Slice<Post> postsSlice) {
+        List<Post> posts = postsSlice.getContent();
+        if (posts.isEmpty()) {
+            return postsSlice.map(p -> null);
+        }
 
+        List<UUID> postIds = posts.stream().map(Post::getId).toList();
+
+        // 1. Batch query thông tin tác giả của các bài viết (1 query)
+        Set<UUID> authorIds = posts.stream()
+                .map(p -> p.getAuthor().getId())
+                .collect(Collectors.toSet());
+        Map<UUID, UserProfile> authorProfileMap = userProfileRepository.findAllById(authorIds)
+                .stream()
+                .collect(Collectors.toMap(UserProfile::getUserId, Function.identity()));
+
+        // 2. Batch query Media (1 query duy nhất cho tất cả bài viết)
+        Map<UUID, List<PostMediaResponse>> mediaMap = postMediaRepository
+                .findAllByPostIdInOrderByDisplayOrderAsc(postIds)
+                .stream()
+                .collect(Collectors.groupingBy(
+                        m -> m.getPost().getId(),
+                        Collectors.mapping(PostMediaResponse::from, Collectors.toList())
+                ));
+
+        // 3. Batch query Hashtags (1 query JOIN FETCH duy nhất)
+        Map<UUID, List<String>> hashtagMap = postHashtagRepository
+                .findAllByPostIdInWithHashtag(postIds)
+                .stream()
+                .collect(Collectors.groupingBy(
+                        ph -> ph.getPost().getId(),
+                        Collectors.mapping(ph -> ph.getHashtag().getTag(), Collectors.toList())
+                ));
+
+        // 4. Batch query Tagged Users (2 query duy nhất: 1 cho post_tags, 1 cho user_profile)
+        List<PostTag> allPostTags = postTagRepository.findAllByPostIdInWithTaggedUser(postIds);
+        Set<UUID> allTaggedUserIds = allPostTags.stream()
+                .map(pt -> pt.getTaggedUser().getId())
+                .collect(Collectors.toSet());
+
+        Map<UUID, UserProfile> taggedProfileMap = allTaggedUserIds.isEmpty()
+                ? Map.of()
+                : userProfileRepository.findAllById(allTaggedUserIds)
+                        .stream()
+                        .collect(Collectors.toMap(UserProfile::getUserId, Function.identity()));
+
+        Map<UUID, List<UserSummaryResponse>> taggedUsersMap = allPostTags.stream()
+                .collect(Collectors.groupingBy(
+                        pt -> pt.getPost().getId(),
+                        Collectors.mapping(
+                                pt -> UserSummaryResponse.from(taggedProfileMap.get(pt.getTaggedUser().getId())),
+                                Collectors.toList()
+                        )
+                ));
+
+        // 5. Map in-memory cực nhanh O(1)
+        return postsSlice.map(post -> {
+            UUID postId = post.getId();
+            UserProfile authorProfile = authorProfileMap.get(post.getAuthor().getId());
+
+            return PostResponse.of(
+                    post,
+                    UserSummaryResponse.from(authorProfile),
+                    mediaMap.getOrDefault(postId, List.of()),
+                    hashtagMap.getOrDefault(postId, List.of()),
+                    taggedUsersMap.getOrDefault(postId, List.of()),
+                    0L, // reactionCount
+                    0L  // commentCount
+            );
+        });
     }
 
     /**

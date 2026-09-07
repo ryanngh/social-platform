@@ -21,6 +21,7 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
                 WHERE p.author.id = :authorId
                   AND p.deletedAt IS NULL
                   AND p.visibility IN :visibilities
+                ORDER BY p.createdAt DESC
             """)
     Slice<Post> findProfilePosts(
             @Param("authorId") UUID authorId,
@@ -32,6 +33,7 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
                 SELECT p FROM Post p
                 WHERE p.author.id = :authorId
                   AND p.deletedAt IS NULL
+                ORDER BY p.createdAt DESC
             """)
     Slice<Post> findOwnProfilePosts(
             @Param("authorId") UUID authorId,
