@@ -359,6 +359,47 @@ public class PostService {
     }
 
     /**
+     * Xóa bài viết (Soft Delete)
+     */
+    @Transactional
+    public void deletePost(UUID currentUserId, UUID postId) {
+        // 1. Kiểm tra bài viết tồn tại và chưa bị xóa mềm
+        Post post = postRepository.findByIdAndDeletedAtIsNull(postId)
+                .orElseThrow(() -> new IllegalArgumentException("Post with id " + postId + " does not exist"));
+
+        // 2. Kiểm tra quyền sở hữu (Chỉ tác giả mới có quyền xóa bài viết)
+        if (!post.getAuthor().getId().equals(currentUserId)) {
+            throw new IllegalStateException("You are not authorized to delete this post");
+        }
+
+        // 3. Thực hiện xóa mềm
+        post.markDeleted();
+    }
+
+    /**
+     * Khôi phục bài viết đã xóa mềm
+     */
+    @Transactional
+    public void restorePost(UUID currentUserId, UUID postId) {
+        // 1. Tìm bài viết theo ID (kể cả đã bị xóa mềm)
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new IllegalArgumentException("Post with id " + postId + " does not exist"));
+
+        // 2. Kiểm tra quyền sở hữu
+        if (!post.getAuthor().getId().equals(currentUserId)) {
+            throw new IllegalStateException("You are not authorized to restore this post");
+        }
+
+        // 3. Kiểm tra xem bài viết có đang trong trạng thái bị xóa không
+        if (!post.isDeleted()) {
+            throw new IllegalStateException("Post is not deleted");
+        }
+
+        // 4. Khôi phục bài viết
+        post.restore();
+    }
+
+    /**
      * Helper tối ưu hiệu năng: Batch fetch tất cả dữ liệu liên quan (Media, Hashtag, Tag, Author)
      * Triệt tiêu hoàn toàn vấn đề N+1 Query khi tải danh sách bài viết.
      */
