@@ -231,6 +231,133 @@ public class PostService {
         return toPostResponseSlice(postsSlice);
     }
 
+    @Transactional
+    public UpdatePostResponse updatePost(UUID currentUserId, UUID postId, UpdatePostRequest request) {
+        //1: Kiểm tra post tồn tại và chưa bị soft-delete
+        Post post = postRepository.findByIdAndDeletedAtIsNull(postId)
+                .orElseThrow(() -> new IllegalArgumentException("Post with id " + postId + " does not exist"));
+
+        //2: Author check
+        if (!post.getAuthor().getId().equals(currentUserId)) {
+            throw new IllegalStateException("You are not authorized to update this post");
+        }
+
+        // 3.1: check final content
+        String updatedContent = post.getContent();
+        if (request.content() != null) {
+            String trimmed = request.content().trim();
+            updatedContent = trimmed.isEmpty() ? null : trimmed;
+        }
+        boolean willHaveContent = updatedContent != null && !updatedContent.isBlank();
+
+        // 3.2 check final media
+        boolean willHaveMedia;
+        if (request.media() != null) {
+            willHaveMedia = !request.media().isEmpty();
+        } else {
+            willHaveMedia = postMediaRepository.existsByPostId(postId);
+        }
+
+        if (!willHaveContent && !willHaveMedia) {
+            throw new IllegalArgumentException("Post must contain at least text content or media");
+        }
+
+        //4: update Entity Post (content & visibility)
+        if (request.content() != null) {
+            post.setContent(updatedContent);
+        }
+        if (request.visibility() != null && request.visibility() != post.getVisibility()) {
+            post.setVisibility(request.visibility());
+        }
+
+        //5: update Media (ảnh / video)
+        List<PostMediaResponse> mediaResponses;
+        if (request.media() != null) {
+            postMediaRepository.deleteByPostId(postId);
+
+            if (!request.media().isEmpty()) {
+                List<PostMedia> postMediaList = new ArrayList<>();
+                List<PostMediaRequest> mediaRequests = request.media();
+                for (int i = 0; i < mediaRequests.size(); i++) {
+                    PostMediaRequest mediaReq = mediaRequests.get(i);
+                    PostMedia media = new PostMedia(
+                            post,
+                            mediaReq.mediaType(),
+                            mediaReq.mediaUrl(),
+                            (short) i
+                    );
+                    if (mediaReq.thumbnailUrl() != null && !mediaReq.thumbnailUrl().isBlank()) {
+                        media.setThumbnailUrl(mediaReq.thumbnailUrl());
+                    }
+                    postMediaList.add(media);
+                }
+                List<PostMedia> savedMedia = postMediaRepository.saveAll(postMediaList);
+                mediaResponses = savedMedia.stream()
+                        .map(PostMediaResponse::from)
+                        .toList();
+            } else {
+                mediaResponses = List.of();
+            }
+        } else {
+            mediaResponses = postMediaRepository.findAllByPostIdOrderByDisplayOrderAsc(postId)
+                    .stream()
+                    .map(PostMediaResponse::from)
+                    .toList();
+        }
+
+        // BƯỚC 6: Cập nhật Hashtags
+        List<String> savedHashtagNames;
+        if (request.hashtags() != null) {
+            postHashtagRepository.deleteByPostId(postId);
+
+            if (!request.hashtags().isEmpty()) {
+                savedHashtagNames = processHashtags(post, request.hashtags());
+            } else {
+                savedHashtagNames = List.of();
+            }
+        } else {
+            savedHashtagNames = postHashtagRepository.findHashtagNamesByPostId(postId);
+        }
+
+        // BƯỚC 7: Cập nhật Tagged Users
+        List<UserSummaryResponse> taggedUsersResponse;
+        if (request.taggedUserIds() != null) {
+            postTagRepository.deleteByPostId(postId);
+
+            if (!request.taggedUserIds().isEmpty()) {
+                List<UserProfile> taggedProfiles = validateAndGetTaggedProfiles(currentUserId, request.taggedUserIds());
+                List<PostTag> postTags = taggedProfiles.stream()
+                        .map(profile -> new PostTag(post, profile.getUser()))
+                        .toList();
+                postTagRepository.saveAll(postTags);
+                taggedUsersResponse = taggedProfiles.stream()
+                        .map(UserSummaryResponse::from)
+                        .toList();
+            } else {
+                taggedUsersResponse = List.of();
+            }
+        } else {
+            List<UUID> taggedUserIds = postTagRepository.findTaggedUserIdsByPostId(postId);
+            taggedUsersResponse = taggedUserIds.isEmpty()
+                    ? List.of()
+                    : userProfileRepository.findAllById(taggedUserIds).stream()
+                    .map(UserSummaryResponse::from)
+                    .toList();
+        }
+
+        // BƯỚC 8: Lấy Profile Tác giả & trả về UpdatePostResponse
+        UserProfile authorProfile = userProfileRepository.findById(currentUserId)
+                .orElseThrow(() -> new UserNotFoundException(currentUserId));
+
+        return UpdatePostResponse.of(
+                post,
+                UserSummaryResponse.from(authorProfile),
+                mediaResponses,
+                savedHashtagNames,
+                taggedUsersResponse
+        );
+    }
+
     /**
      * Helper tối ưu hiệu năng: Batch fetch tất cả dữ liệu liên quan (Media, Hashtag, Tag, Author)
      * Triệt tiêu hoàn toàn vấn đề N+1 Query khi tải danh sách bài viết.
@@ -278,8 +405,8 @@ public class PostService {
         Map<UUID, UserProfile> taggedProfileMap = allTaggedUserIds.isEmpty()
                 ? Map.of()
                 : userProfileRepository.findAllById(allTaggedUserIds)
-                        .stream()
-                        .collect(Collectors.toMap(UserProfile::getUserId, Function.identity()));
+                .stream()
+                .collect(Collectors.toMap(UserProfile::getUserId, Function.identity()));
 
         Map<UUID, List<UserSummaryResponse>> taggedUsersMap = allPostTags.stream()
                 .collect(Collectors.groupingBy(
@@ -308,7 +435,7 @@ public class PostService {
     }
 
     /**
-    * HELPER
+     * HELPER
      */
     private PostResponse toPostResponse(Post post) {
         UUID postId = post.getId();
@@ -345,6 +472,7 @@ public class PostService {
                 0L  // commentCount
         );
     }
+
     private List<UserProfile> validateAndGetTaggedProfiles(UUID currentUserId, List<UUID> rawTaggedIds) {
         if (rawTaggedIds == null || rawTaggedIds.isEmpty()) {
             return List.of();
