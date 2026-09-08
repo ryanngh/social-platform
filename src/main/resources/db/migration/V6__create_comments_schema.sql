@@ -50,7 +50,7 @@ CREATE TABLE comments
             content IS NULL
             OR (
                 length(btrim(content)) > 0
-                AND length(content) <= 2200
+                AND length(content) <= 10000
             )
         ),
 
