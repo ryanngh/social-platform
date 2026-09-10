@@ -20,7 +20,8 @@ public record CommentResponse(
         Instant pinnedAt,
         Instant createdAt,
         Instant editedAt,
-        Instant updatedAt
+        Instant updatedAt,
+        CommentPermissionsResponse permissions
 ) {
     public static CommentResponse of(
             UUID id,
@@ -36,23 +37,16 @@ public record CommentResponse(
             Instant pinnedAt,
             Instant createdAt,
             Instant editedAt,
-            Instant updatedAt
+            Instant updatedAt,
+            CommentPermissionsResponse permissions
     ) {
         return new CommentResponse(
-                id,
-                postId,
-                parentCommentId,
-                author,
-                content,
+                id, postId, parentCommentId, author, content,
                 media != null ? media : List.of(),
                 mentions != null ? mentions : List.of(),
-                likeCount,
-                replyCount,
-                isPinned,
-                pinnedAt,
-                createdAt,
-                editedAt,
-                updatedAt
+                likeCount, replyCount, isPinned, pinnedAt,
+                createdAt, editedAt, updatedAt,
+                permissions
         );
     }
 }
