@@ -142,24 +142,4 @@ public class Comment {
         this.pinned = false;
         this.pinnedAt = null;
     }
-
-    public void incrementLikeCount() {
-        this.likeCount++;
-    }
-
-    public void decrementLikeCount() {
-        if (this.likeCount > 0) {
-            this.likeCount--;
-        }
-    }
-
-    public void incrementReplyCount() {
-        this.replyCount++;
-    }
-
-    public void decrementReplyCount() {
-        if (this.replyCount > 0) {
-            this.replyCount--;
-        }
-    }
 }
