@@ -438,6 +438,141 @@ public class CommentService {
         return new SliceImpl<>(resultList, pageable, commentsSlice.hasNext());
     }
 
+
+    /**
+     * getCommentReplies
+     *
+     */
+
+    public Slice<ReplyResponse> getCommentReplies(UUID currentUserId, UUID commentId, Pageable pageable) {
+        Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
+                .orElseThrow(() -> new IllegalArgumentException("comment not found"));
+        Post post = postRepository.findByIdAndDeletedAtIsNull(comment.getPost().getId())
+                .orElseThrow(() -> new IllegalArgumentException("Post does not exist or has been deleted"));
+        UUID postAuthorId = post.getAuthor().getId();
+
+        if (!currentUserId.equals(postAuthorId) && userBlockRepository.existsBlockBetween(currentUserId, postAuthorId)) {
+            throw new IllegalArgumentException("You cannot comment on this post");
+        }
+
+        switch (post.getVisibility()) {
+            case PUBLIC -> {
+            }
+            case FRIENDS -> {
+                if (!currentUserId.equals(postAuthorId) && !friendshipRepository.areFriends(currentUserId, postAuthorId)) {
+                    throw new IllegalArgumentException("You must be friends with the post author to view comments");
+                }
+            }
+            case CLOSE_FRIENDS -> {
+                // TODO: Implement Close Friends module
+            }
+            case PRIVATE -> {
+                if (!currentUserId.equals(postAuthorId)) {
+                    throw new IllegalArgumentException("You cannot view comments on this post");
+                }
+            }
+        }
+
+        Slice<Comment> replies = commentRepository.findReplies(commentId, pageable);
+        if (replies.isEmpty()) {
+            return new SliceImpl<>(
+                    List.of(),
+                    pageable,
+                    false
+            );
+        }
+
+        List<Comment> replyComments = replies.getContent();
+
+        List<UUID> replyIds = replyComments.stream()
+                .map(Comment::getId)
+                .toList();
+
+        Set<UUID> authorIds = replyComments.stream()
+                .map(Comment::getAuthor)
+                .filter(Objects::nonNull)
+                .map(User::getId)
+                .collect(Collectors.toSet());
+
+        List<CommentMedia> mediaList =
+                commentMediaRepository
+                        .findByCommentIdInOrderByDisplayOrderAsc(replyIds);
+
+        List<CommentMention> mentionList =
+                commentMentionRepository.findByCommentIdIn(replyIds);
+
+        Set<UUID> allUserIdsToFetch = new HashSet<>(authorIds);
+        mentionList.forEach(m -> {
+            if (m.getMentionedUser() != null) {
+                allUserIdsToFetch.add(m.getMentionedUser().getId());
+            }
+        });
+        if (comment.getAuthor() != null) {
+            allUserIdsToFetch.add(comment.getAuthor().getId());
+        }
+
+        Map<UUID, UserProfile> userProfileMap = userProfileRepository.findAllById(allUserIdsToFetch)
+                .stream()
+                .collect(Collectors.toMap(UserProfile::getUserId, Function.identity()));
+
+        Map<UUID, List<CommentMediaResponse>> mediaMap = mediaList.stream()
+                .collect(Collectors.groupingBy(
+                        m -> m.getComment().getId(),
+                        Collectors.mapping(CommentMediaResponse::from, Collectors.toList())
+                ));
+
+        Map<UUID, List<CommentMention>> mentionsByCommentId = mentionList.stream()
+                .collect(Collectors.groupingBy(m -> m.getComment().getId()));
+        UserProfile parentAuthorProfile = comment.getAuthor() != null
+                ? userProfileMap.get(comment.getAuthor().getId())
+                : null;
+        List<ReplyResponse> responseList = replyComments.stream().map(reply -> {
+            // A. Xác định tác giả của reply
+            //! ko bị N+1 vì thứ tự logic đúng, nếu refactor lại 100% N+1 replyAuthorId
+            UUID replyAuthorId = reply.getAuthor() != null ? reply.getAuthor().getId() : null;
+            UserSummaryResponse authorSummary = replyAuthorId != null
+                    ? UserSummaryResponse.from(userProfileMap.get(replyAuthorId))
+                    : null;
+            // B. Lấy danh sách mentions của reply này
+            List<CommentMention> replyMentions = mentionsByCommentId.getOrDefault(reply.getId(), List.of());
+            // C. Xác định replyToUser:
+            // Nếu có mention -> lấy người đầu tiên; Nếu không có -> lấy tác giả comment cha
+            UserSummaryResponse replyToUserSummary;
+            if (!replyMentions.isEmpty()) {
+                UUID firstMentionedUserId = replyMentions.get(0).getMentionedUser().getId();
+                replyToUserSummary = UserSummaryResponse.from(userProfileMap.get(firstMentionedUserId));
+            } else {
+                replyToUserSummary = UserSummaryResponse.from(parentAuthorProfile);
+            }
+            // D. Danh sách mention DTO
+            List<UserSummaryResponse> mentionResponses = replyMentions.stream()
+                    .map(m -> UserSummaryResponse.from(userProfileMap.get(m.getMentionedUser().getId())))
+                    .filter(Objects::nonNull)
+                    .toList();
+            // E. Danh sách media DTO
+            List<CommentMediaResponse> commentMediaResponses = mediaMap.getOrDefault(reply.getId(), List.of());
+            return ReplyResponse.of(
+                    reply.getId(),
+                    post.getId(),
+                    comment.getId(),
+                    authorSummary,
+                    replyToUserSummary,
+                    reply.getContent(),
+                    commentMediaResponses,
+                    mentionResponses,
+                    reply.getLikeCount(),
+                    reply.getCreatedAt(),
+                    reply.getEditedAt(),
+                    reply.getUpdatedAt()
+            );
+        }).toList();
+        // 11. Trả về Slice phân trang
+        return new SliceImpl<>(responseList, pageable, replies.hasNext());
+    }
+
+    /**
+     * HELPER
+     */
     private CommentResponse mapToCommentResponse(
             Comment comment,
             Map<UUID, UserProfile> userProfileMap,
@@ -490,88 +625,84 @@ public class CommentService {
         return CommentPermissionsResponse.of(canEdit, canDelete, canPin);
     }
 
-
-/**
- * HELPER
- *
- */
-private Sort resolveSort(CommentSortBy sortBy) {
-    if (sortBy == null) {
-        sortBy = CommentSortBy.POPULAR;
-    }
-    return switch (sortBy) {
-        // Index: idx_comments_post_top_level_popular
-        case POPULAR -> Sort.by(
-                Sort.Order.desc("likeCount"),
-                Sort.Order.desc("replyCount"),
-                Sort.Order.asc("createdAt"),
-                Sort.Order.asc("id")
-        );
-        // Index: idx_comments_post_top_level_created (chiều xuôi)
-        case NEWEST -> Sort.by(
-                Sort.Order.desc("createdAt"),
-                Sort.Order.desc("id")
-        );
-        // Index: idx_comments_post_top_level_created (Postgres B-Tree Backward Scan)
-        case OLDEST -> Sort.by(
-                Sort.Order.asc("createdAt"),
-                Sort.Order.asc("id")
-        );
-    };
-}
-
-private static @NonNull List<CommentMedia> getCommentMedia(List<CommentMediaRequest> mediaRequests, Comment comment) {
-    if (mediaRequests == null || mediaRequests.isEmpty()) {
-        return List.of();
+    private Sort resolveSort(CommentSortBy sortBy) {
+        if (sortBy == null) {
+            sortBy = CommentSortBy.POPULAR;
+        }
+        return switch (sortBy) {
+            // Index: idx_comments_post_top_level_popular
+            case POPULAR -> Sort.by(
+                    Sort.Order.desc("likeCount"),
+                    Sort.Order.desc("replyCount"),
+                    Sort.Order.asc("createdAt"),
+                    Sort.Order.asc("id")
+            );
+            // Index: idx_comments_post_top_level_created (chiều xuôi)
+            case NEWEST -> Sort.by(
+                    Sort.Order.desc("createdAt"),
+                    Sort.Order.desc("id")
+            );
+            // Index: idx_comments_post_top_level_created (Postgres B-Tree Backward Scan)
+            case OLDEST -> Sort.by(
+                    Sort.Order.asc("createdAt"),
+                    Sort.Order.asc("id")
+            );
+        };
     }
 
-    List<CommentMedia> mediaList = new ArrayList<>();
+    private static @NonNull List<CommentMedia> getCommentMedia(List<CommentMediaRequest> mediaRequests, Comment
+            comment) {
+        if (mediaRequests == null || mediaRequests.isEmpty()) {
+            return List.of();
+        }
 
-    for (int i = 0; i < mediaRequests.size(); i++) {
-        CommentMediaRequest mediaReq = mediaRequests.get(i);
+        List<CommentMedia> mediaList = new ArrayList<>();
 
-        CommentMedia media = new CommentMedia(comment, mediaReq.mediaType(), mediaReq.mediaUrl(), (short) i);
+        for (int i = 0; i < mediaRequests.size(); i++) {
+            CommentMediaRequest mediaReq = mediaRequests.get(i);
 
-        media.setWidth(mediaReq.width());
-        media.setHeight(mediaReq.height());
+            CommentMedia media = new CommentMedia(comment, mediaReq.mediaType(), mediaReq.mediaUrl(), (short) i);
 
-        mediaList.add(media);
-    }
-    return mediaList;
-}
+            media.setWidth(mediaReq.width());
+            media.setHeight(mediaReq.height());
 
-private List<UserProfile> validateAndGetTaggedProfiles(UUID currentUserId, List<UUID> rawTaggedIds) {
-    if (rawTaggedIds == null || rawTaggedIds.isEmpty()) {
-        return List.of();
-    }
-
-    // 1. Lọc trùng ID và LOẠI BỎ chính mình (không tự tag mình)
-    Set<UUID> uniqueIds = new HashSet<>(rawTaggedIds);
-    uniqueIds.remove(null);
-    uniqueIds.remove(currentUserId);
-
-    if (uniqueIds.isEmpty()) {
-        return List.of();
+            mediaList.add(media);
+        }
+        return mediaList;
     }
 
-    // 2. Batch query kiểm tra sự tồn tại trong DB (1 query duy nhất)
-    List<UserProfile> profiles = userProfileRepository.findAllById(uniqueIds);
-    if (profiles.size() != uniqueIds.size()) {
-        Set<UUID> foundIds = profiles.stream().map(UserProfile::getUserId).collect(Collectors.toSet());
-        for (UUID requestedId : uniqueIds) {
-            if (!foundIds.contains(requestedId)) {
-                throw new UserNotFoundException(requestedId);
+    private List<UserProfile> validateAndGetTaggedProfiles(UUID currentUserId, List<UUID> rawTaggedIds) {
+        if (rawTaggedIds == null || rawTaggedIds.isEmpty()) {
+            return List.of();
+        }
+
+        // 1. Lọc trùng ID và LOẠI BỎ chính mình (không tự tag mình)
+        Set<UUID> uniqueIds = new HashSet<>(rawTaggedIds);
+        uniqueIds.remove(null);
+        uniqueIds.remove(currentUserId);
+
+        if (uniqueIds.isEmpty()) {
+            return List.of();
+        }
+
+        // 2. Batch query kiểm tra sự tồn tại trong DB (1 query duy nhất)
+        List<UserProfile> profiles = userProfileRepository.findAllById(uniqueIds);
+        if (profiles.size() != uniqueIds.size()) {
+            Set<UUID> foundIds = profiles.stream().map(UserProfile::getUserId).collect(Collectors.toSet());
+            for (UUID requestedId : uniqueIds) {
+                if (!foundIds.contains(requestedId)) {
+                    throw new UserNotFoundException(requestedId);
+                }
             }
         }
-    }
 
-    // 3. Kiểm tra quan hệ chặn (Block 2 chiều)
-    for (UserProfile profile : profiles) {
-        if (userBlockRepository.existsBlockBetween(currentUserId, profile.getUserId())) {
-            throw new IllegalStateException("Cannot tag user with id: " + profile.getUserId() + " due to block restrictions");
+        // 3. Kiểm tra quan hệ chặn (Block 2 chiều)
+        for (UserProfile profile : profiles) {
+            if (userBlockRepository.existsBlockBetween(currentUserId, profile.getUserId())) {
+                throw new IllegalStateException("Cannot tag user with id: " + profile.getUserId() + " due to block restrictions");
+            }
         }
-    }
 
-    return profiles;
-}
+        return profiles;
+    }
 }

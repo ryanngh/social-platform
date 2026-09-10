@@ -47,6 +47,18 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             Pageable pageable
     );
 
+    @Query("""
+                SELECT c
+                FROM Comment c
+                WHERE c.parentComment.id = :commentId
+                  AND c.deletedAt IS NULL
+                ORDER BY c.createdAt ASC, c.id ASC
+            """)
+    Slice<Comment> findReplies(
+            @Param("commentId") UUID commentId,
+            Pageable pageable
+    );
+
     @Modifying
     @Query("UPDATE Comment c SET c.replyCount = c.replyCount + 1 WHERE c.id = :id")
     int incrementReplyCount(@Param("id") UUID id);

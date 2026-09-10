@@ -14,6 +14,7 @@ public interface CommentMentionRepository extends JpaRepository<CommentMention, 
     @Query("""
         SELECT cm FROM CommentMention cm
         WHERE cm.comment.id IN :commentIds
+        ORDER BY cm.createdAt ASC
     """)
     List<CommentMention> findByCommentIdIn(@Param("commentIds") Collection<UUID> commentIds);
 }
