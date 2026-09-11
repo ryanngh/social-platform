@@ -184,7 +184,9 @@ public class CommentService {
         // 4. Chuẩn hóa 2 tầng (Facebook Flattened Model)
         Comment actualParent;
         User replyToUser = targetComment.getAuthor();
-        List<UUID> mentionIds = new ArrayList<>(request.mentionedUserIds());
+        List<UUID> mentionIds = request.mentionedUserIds() != null
+                ? new ArrayList<>(request.mentionedUserIds())
+                : new ArrayList<>();
 
         if (targetComment.isTopLevel()) {
             // Trường hợp A: Trả lời trực tiếp comment cấp 1
@@ -673,12 +675,10 @@ public class CommentService {
             return loadAndBuildCommentResponse(comment, currentUserId, postAuthorId);
         }
 
-        // Giải quyết xung đột Unique Index:
         // Gỡ ghim comment cũ đang ghim của bài post này (nếu có)
         UUID postId = comment.getPost().getId();
         commentRepository.unpinAllByPostId(postId);
 
-        // Bật cờ ghim cho comment mới (tái sử dụng hàm pin() có sẵn trong Comment.java)
         comment.pin();
         comment = commentRepository.saveAndFlush(comment);
 
@@ -706,6 +706,54 @@ public class CommentService {
 
         return loadAndBuildCommentResponse(comment, currentUserId, postAuthorId);
     }
+
+    /**
+     * getCommentById
+     */
+    @Transactional(readOnly = true)
+    public CommentResponse getCommentById(UUID currentUserId, UUID commentId) {
+        // 1.
+        Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
+                .orElseThrow(() -> new IllegalArgumentException("commentId"));
+
+        // 2.
+        Post post = comment.getPost();
+        if (post.isDeleted()) {
+            throw new IllegalArgumentException("commentId"); // Bài viết bị xóa thì comment cũng coi như không tìm thấy
+        }
+
+        UUID postAuthorId = post.getAuthor().getId();
+
+        // 3.
+        if (currentUserId != null && !currentUserId.equals(postAuthorId)
+                && userBlockRepository.existsBlockBetween(currentUserId, postAuthorId)) {
+            throw new AccessDeniedException("You do not have permission to view this comment");
+        }
+
+        // 4. (Visibility)
+        switch (post.getVisibility()) {
+            case PUBLIC -> {
+            }
+            case FRIENDS -> {
+                boolean isPostAuthor = currentUserId != null && currentUserId.equals(postAuthorId);
+                boolean isFriend = currentUserId != null && friendshipRepository.areFriends(currentUserId, postAuthorId);
+                if (!isPostAuthor && !isFriend) {
+                    throw new AccessDeniedException("You must be friends with the post author to view this comment");
+                }
+            }
+            case CLOSE_FRIENDS -> {
+                // TODO: Triển khai module Close Friends khi có
+            }
+            case PRIVATE -> {
+                if (currentUserId == null || !currentUserId.equals(postAuthorId)) {
+                    throw new AccessDeniedException("This comment belongs to a private post");
+                }
+            }
+        }
+
+        return loadAndBuildCommentResponse(comment, currentUserId, postAuthorId);
+    }
+
 
     /**
      * HELPER
@@ -831,8 +879,7 @@ public class CommentService {
         };
     }
 
-    private static @NonNull List<CommentMedia> getCommentMedia(List<CommentMediaRequest> mediaRequests, Comment
-            comment) {
+    private static @NonNull List<CommentMedia> getCommentMedia(List<CommentMediaRequest> mediaRequests, Comment comment) {
         if (mediaRequests == null || mediaRequests.isEmpty()) {
             return List.of();
         }
