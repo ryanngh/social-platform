@@ -59,7 +59,23 @@ public interface CommentRepository extends JpaRepository<Comment, UUID> {
             Pageable pageable
     );
 
+    @Modifying(flushAutomatically = true)
+    @Query("""
+    UPDATE Comment c
+    SET c.pinned = false, c.pinnedAt = null
+    WHERE c.post.id = :postId AND c.pinned = true
+""")
+    int unpinAllByPostId(@Param("postId") UUID postId);
+
     @Modifying
     @Query("UPDATE Comment c SET c.replyCount = c.replyCount + 1 WHERE c.id = :id")
     int incrementReplyCount(@Param("id") UUID id);
+
+    @Modifying
+    @Query("""
+    UPDATE Comment c 
+    SET c.replyCount = CASE WHEN c.replyCount > 0 THEN c.replyCount - 1 ELSE 0 END 
+    WHERE c.id = :id
+""")
+    int decrementReplyCount(@Param("id") UUID id);
 }

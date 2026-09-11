@@ -131,21 +131,7 @@ public class CommentService {
         }
 
         // 8. Return response
-        CommentPermissionsResponse permissions = CommentPermissionsResponse.of(
-                true, // canEdit (vừa tạo xong thì là chính chủ)
-                true, // canDelete (chính chủ luôn xóa được)
-                currentUserId.equals(authorId) // canPin (nếu kiêm luôn chủ post thì được pin)
-        );
-
-        return CommentResponse.of(
-                comment.getId(), post.getId(), null,
-                UserSummaryResponse.from(authorProfile),
-                comment.getContent(), mediaResponses, mentionResponses,
-                comment.getLikeCount(), comment.getReplyCount(),
-                comment.isPinned(), comment.getPinnedAt(),
-                comment.getCreatedAt(), comment.getEditedAt(), comment.getUpdatedAt(),
-                permissions
-        );
+        return toCommentResponse(comment, authorProfile, mediaResponses, mentionResponses, currentUserId, authorId);
     }
 
     /**
@@ -292,7 +278,7 @@ public class CommentService {
     /**
      * getPostComments
      */
-
+    @Transactional(readOnly = true)
     public Slice<CommentResponse> getPostComments(UUID currentUserId, UUID postId, CommentSortBy sortBy, Pageable pageable) {
         // 1. PERMISSION & VISIBILITY
         Post post = postRepository.findByIdAndDeletedAtIsNull(postId)
@@ -444,6 +430,7 @@ public class CommentService {
      *
      */
 
+    @Transactional(readOnly = true)
     public Slice<ReplyResponse> getCommentReplies(UUID currentUserId, UUID commentId, Pageable pageable) {
         Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
                 .orElseThrow(() -> new IllegalArgumentException("comment not found"));
@@ -570,6 +557,156 @@ public class CommentService {
         return new SliceImpl<>(responseList, pageable, replies.hasNext());
     }
 
+    /*
+     * updateComment
+     * */
+    @Transactional
+    public CommentResponse updateComment(UUID currentUserId, UUID commentId, UpdateCommentRequest request) {
+        Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
+                .orElseThrow(() -> new IllegalArgumentException(""));
+        //TODO
+
+        UUID authorId = comment.getAuthor() != null ? comment.getAuthor().getId() : null;
+        if (authorId == null || !authorId.equals(currentUserId)) {
+            throw new AccessDeniedException("You do not have permission to edit this comment");
+        }
+
+        // Validate content
+        boolean hasContent = request.content() != null && !request.content().isBlank();
+        boolean hasMedia = request.media() != null && !request.media().isEmpty();
+        if (!hasContent && !hasMedia) {
+            throw new IllegalArgumentException("Comment must contain content or media");
+        }
+        if (hasContent && request.content().length() > 10000) {
+            throw new IllegalArgumentException("Comment content must not exceed 10000 characters");
+        }
+
+        // Update entity
+        comment.updateContent(request.content());
+
+
+        // Replace Media content
+
+        commentMediaRepository.deleteByCommentId(commentId);
+        List<CommentMediaResponse> mediaResponses = List.of();
+
+        if (hasMedia) {
+            List<CommentMedia> newMediaList = getCommentMedia(request.media(), comment);
+            mediaResponses = commentMediaRepository.saveAll(newMediaList)
+                    .stream()
+                    .map(CommentMediaResponse::from)
+                    .toList();
+        }
+
+        // Replace taggedUser
+        commentMentionRepository.deleteByCommentId(commentId);
+        List<UserSummaryResponse> mentionResponses = List.of();
+        if (request.mentionedUserIds() != null && !request.mentionedUserIds().isEmpty()) {
+            // Tái sử dụng hàm helper validateAndGetTaggedProfiles có sẵn
+            List<UserProfile> taggedProfiles = validateAndGetTaggedProfiles(currentUserId, request.mentionedUserIds());
+            if (!taggedProfiles.isEmpty()) {
+                Comment finalComment = comment;
+                List<CommentMention> newMentions = taggedProfiles.stream()
+                        .map(profile -> new CommentMention(finalComment, profile.getUser()))
+                        .toList();
+                commentMentionRepository.saveAll(newMentions);
+                mentionResponses = taggedProfiles.stream()
+                        .map(UserSummaryResponse::from)
+                        .toList();
+            }
+        }
+
+        UserProfile authorProfile = userProfileRepository.findById(currentUserId)
+                .orElseThrow(() -> new UserNotFoundException(currentUserId));
+
+        UUID postAuthorId = comment.getPost().getAuthor().getId();
+        return toCommentResponse(comment, authorProfile, mediaResponses, mentionResponses, currentUserId, postAuthorId);
+    }
+
+    /**
+     * deleteComment
+     */
+
+    @Transactional
+    public void deleteComment(UUID currentUserId, UUID commentId) {
+        Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
+                .orElseThrow(() -> new IllegalArgumentException("Comment with id " + commentId + " does not exist or has already been deleted"));
+
+        UUID commentAuthorId = comment.getAuthor() != null ? comment.getAuthor().getId() : null;
+        UUID postAuthorId = comment.getPost().getAuthor().getId();
+
+        boolean isCommentAuthor = currentUserId.equals(commentAuthorId);
+        boolean isPostAuthor = currentUserId.equals(postAuthorId);
+        if (!isCommentAuthor && !isPostAuthor) {
+            throw new AccessDeniedException("You do not have permission to delete this comment");
+        }
+
+        comment.markDeleted();
+        if (comment.isPinned()) {
+            comment.unpin();
+        }
+
+        if (comment.getParentComment() != null) {
+            UUID parentCommentId = comment.getParentComment().getId();
+            commentRepository.decrementReplyCount(parentCommentId);
+        }
+    }
+
+    /**
+     * pinComment
+     */
+    @Transactional
+    public CommentResponse pinComment(UUID currentUserId, UUID commentId) {
+        Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
+                .orElseThrow(() -> new IllegalArgumentException("Comment with id " + commentId + " does not exist or has been deleted"));
+
+        UUID postAuthorId = comment.getPost().getAuthor().getId();
+        if (currentUserId == null || !currentUserId.equals(postAuthorId)) {
+            throw new AccessDeniedException("Only the post author has permission to pin comments");
+        }
+
+        if (!comment.isTopLevel()) {
+            throw new IllegalArgumentException("Only top-level comments can be pinned");
+        }
+
+        if (comment.isPinned()) {
+            return loadAndBuildCommentResponse(comment, currentUserId, postAuthorId);
+        }
+
+        // Giải quyết xung đột Unique Index:
+        // Gỡ ghim comment cũ đang ghim của bài post này (nếu có)
+        UUID postId = comment.getPost().getId();
+        commentRepository.unpinAllByPostId(postId);
+
+        // Bật cờ ghim cho comment mới (tái sử dụng hàm pin() có sẵn trong Comment.java)
+        comment.pin();
+        comment = commentRepository.saveAndFlush(comment);
+
+        // Trả về CommentResponse tái sử dụng
+        return loadAndBuildCommentResponse(comment, currentUserId, postAuthorId);
+    }
+
+    /**
+     * unpinComment
+     */
+    @Transactional
+    public CommentResponse unpinComment(UUID currentUserId, UUID commentId) {
+        Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
+                .orElseThrow(() -> new IllegalArgumentException("Comment with id " + commentId + " does not exist or has been deleted"));
+
+        UUID postAuthorId = comment.getPost().getAuthor().getId();
+        if (currentUserId == null || !currentUserId.equals(postAuthorId)) {
+            throw new AccessDeniedException("Only the post author has permission to unpin comments");
+        }
+
+        if (comment.isPinned()) {
+            comment.unpin();
+            comment = commentRepository.saveAndFlush(comment);
+        }
+
+        return loadAndBuildCommentResponse(comment, currentUserId, postAuthorId);
+    }
+
     /**
      * HELPER
      */
@@ -587,6 +724,17 @@ public class CommentService {
         List<CommentMediaResponse> media = mediaMap.getOrDefault(comment.getId(), List.of());
         List<UserSummaryResponse> mentions = mentionsMap.getOrDefault(comment.getId(), List.of());
 
+        return toCommentResponse(comment, authorProfile, media, mentions, currentUserId, postAuthorId);
+    }
+
+    private CommentResponse toCommentResponse(
+            Comment comment,
+            UserProfile authorProfile,
+            List<CommentMediaResponse> media,
+            List<UserSummaryResponse> mentions,
+            UUID currentUserId,
+            UUID postAuthorId
+    ) {
         CommentPermissionsResponse permissions = resolvePermissions(comment, currentUserId, postAuthorId);
 
         return CommentResponse.of(
@@ -595,8 +743,8 @@ public class CommentService {
                 comment.getParentComment() != null ? comment.getParentComment().getId() : null,
                 UserSummaryResponse.from(authorProfile),
                 comment.getContent(),
-                media,
-                mentions,
+                media != null ? media : List.of(),
+                mentions != null ? mentions : List.of(),
                 comment.getLikeCount(),
                 comment.getReplyCount(),
                 comment.isPinned(),
@@ -606,6 +754,39 @@ public class CommentService {
                 comment.getUpdatedAt(),
                 permissions
         );
+    }
+
+    /**
+     * Nạp quan hệ (media, mentions, authorProfile) của 1 comment đơn lẻ từ DB và chuyển thành CommentResponse
+     */
+    private CommentResponse loadAndBuildCommentResponse(Comment comment, UUID currentUserId, UUID postAuthorId) {
+        UUID authorId = comment.getAuthor() != null ? comment.getAuthor().getId() : null;
+        UserProfile authorProfile = authorId != null
+                ? userProfileRepository.findById(authorId).orElse(null)
+                : null;
+
+        List<CommentMediaResponse> media = commentMediaRepository
+                .findByCommentIdInOrderByDisplayOrderAsc(List.of(comment.getId()))
+                .stream()
+                .map(CommentMediaResponse::from)
+                .toList();
+
+        List<CommentMention> mentions = commentMentionRepository.findByCommentIdIn(List.of(comment.getId()));
+        List<UserSummaryResponse> mentionResponses = List.of();
+        if (!mentions.isEmpty()) {
+            Set<UUID> userIds = mentions.stream()
+                    .map(m -> m.getMentionedUser().getId())
+                    .collect(Collectors.toSet());
+            Map<UUID, UserProfile> profileMap = userProfileRepository.findAllById(userIds)
+                    .stream()
+                    .collect(Collectors.toMap(UserProfile::getUserId, Function.identity()));
+
+            mentionResponses = mentions.stream()
+                    .map(m -> UserSummaryResponse.from(profileMap.get(m.getMentionedUser().getId())))
+                    .toList();
+        }
+
+        return toCommentResponse(comment, authorProfile, media, mentionResponses, currentUserId, postAuthorId);
     }
 
     private CommentPermissionsResponse resolvePermissions(Comment comment, UUID currentUserId, UUID postAuthorId) {
