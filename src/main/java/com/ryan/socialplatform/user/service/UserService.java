@@ -255,7 +255,9 @@ public class UserService {
             throw new UserNotFoundException(userId);
         }
 
+/*
         String oldAvatarUrl = profile.getAvatarUrl();
+*/
 
         // 1. Upload ảnh mới lên MinIO
         String newAvatarUrl = storageService.uploadFile("avatars", userId, file);
@@ -264,10 +266,10 @@ public class UserService {
         profile.setAvatarUrl(newAvatarUrl);
         UserProfile savedProfile = userProfileRepository.save(profile);
 
-        // 3. Xóa avatar cũ khỏi MinIO để dọn rác
+/*        // 3. Xóa avatar cũ khỏi MinIO để dọn rác
         if (oldAvatarUrl != null && !oldAvatarUrl.isBlank()) {
             storageService.deleteFile(oldAvatarUrl);
-        }
+        }*/
 
         return UserResponse.from(profile.getUser(), savedProfile, true);
     }
@@ -286,7 +288,7 @@ public class UserService {
             throw new UserNotFoundException(userId);
         }
 
-        String oldBannerUrl = profile.getBannerUrl();
+       /* String oldBannerUrl = profile.getBannerUrl();*/
 
         // 1. Upload ảnh mới lên MinIO
         String newBannerUrl = storageService.uploadFile("banners", userId, file);
@@ -296,9 +298,9 @@ public class UserService {
         UserProfile savedProfile = userProfileRepository.save(profile);
 
         // 3. Xóa banner cũ khỏi MinIO
-        if (oldBannerUrl != null && !oldBannerUrl.isBlank()) {
+/*        if (oldBannerUrl != null && !oldBannerUrl.isBlank()) {
             storageService.deleteFile(oldBannerUrl);
-        }
+        }*/
 
         return UserResponse.from(profile.getUser(), savedProfile, true);
     }
