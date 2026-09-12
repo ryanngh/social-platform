@@ -1,15 +1,25 @@
 package com.ryan.socialplatform.storage;
 
+import com.ryan.socialplatform.storage.dto.PresignResponse;
 import io.minio.*;
 import jakarta.annotation.PostConstruct;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.InputStream;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 @Service
 public class StorageService {
+    private static final int PRESIGN_EXPIRY_SECONDS = 600; // 10 phút
+
+    private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
+            "image/jpeg", "image/png", "image/webp", "image/gif",
+            "video/mp4", "video/quicktime", "video/webm"
+    );
+
     private final MinioClient minioClient;
     private final MinioProperties props;
     public StorageService(MinioClient minioClient, MinioProperties props) {
@@ -106,6 +116,53 @@ public class StorageService {
             default -> "application/octet-stream";
         };
     }
+    /**
+     * Tạo Presigned PUT URL để client upload file trực tiếp lên MinIO (không qua backend).
+     *
+     * @param folder      Thư mục lưu trữ (vd: "posts", "comments")
+     * @param userId      ID của user đang upload
+     * @param fileName    Tên file gốc (dùng để lấy extension)
+     * @param contentType MIME type của file (vd: "image/jpeg", "video/mp4")
+     * @return PresignResponse chứa uploadUrl, objectKey, publicUrl, expiresIn
+     */
+    public PresignResponse generatePresignedPutUrl(String folder, UUID userId, String fileName, String contentType) {
+        validateContentType(contentType);
+
+        String extension = extractExtension(fileName);
+        String objectKey = folder + "/" + userId + "/" + UUID.randomUUID() + extension;
+
+        try {
+            String uploadUrl = minioClient.getPresignedObjectUrl(
+                    GetPresignedObjectUrlArgs.builder()
+                            .method(Http.Method.PUT)
+                            .bucket(props.getBucket())
+                            .object(objectKey)
+                            .expiry(PRESIGN_EXPIRY_SECONDS, TimeUnit.SECONDS)
+                            .build()
+            );
+
+            return new PresignResponse(uploadUrl, objectKey, objectKey, PRESIGN_EXPIRY_SECONDS);
+        } catch (Exception e) {
+            throw new RuntimeException("Lỗi khi tạo presigned URL: " + e.getMessage(), e);
+        }
+    }
+
+    private String extractExtension(String fileName) {
+        if (fileName == null || !fileName.contains(".")) {
+            return "";
+        }
+        return fileName.substring(fileName.lastIndexOf("."));
+    }
+
+    private void validateContentType(String contentType) {
+        if (contentType == null || !ALLOWED_CONTENT_TYPES.contains(contentType.toLowerCase())) {
+            throw new IllegalArgumentException(
+                    "Content type không được hỗ trợ: " + contentType
+                            + ". Chỉ chấp nhận: " + ALLOWED_CONTENT_TYPES
+            );
+        }
+    }
+
     /**
      * Xóa file trên MinIO theo URL hoặc Object Name
      */
