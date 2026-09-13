@@ -1,8 +1,11 @@
 package com.ryan.socialplatform.storage;
 
+import com.ryan.socialplatform.common.exception.BadRequestException;
 import com.ryan.socialplatform.storage.dto.PresignResponse;
+import com.ryan.socialplatform.storage.exceptions.StorageException;
 import io.minio.*;
 import jakarta.annotation.PostConstruct;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -11,6 +14,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
+@Slf4j
 @Service
 public class StorageService {
     private static final int PRESIGN_EXPIRY_SECONDS = 600; // 10 phút
@@ -61,7 +65,8 @@ public class StorageService {
                 );
             }
         } catch (Exception e) {
-            throw new RuntimeException(e.getMessage(), e);
+            log.error("Failed to initialize storage bucket: {}", props.getBucket(), e);
+            throw new StorageException("Unable to initialize storage", e);
         }
     }
     /**
@@ -72,7 +77,7 @@ public class StorageService {
      */
     public String uploadFile(String folder, UUID byUser,MultipartFile file) {
         if (file.isEmpty()) {
-            throw new IllegalArgumentException("File cannot null!");
+            throw new BadRequestException("File must not be empty");
         }
         String originalFilename = file.getOriginalFilename();
         String extension = "";
@@ -99,7 +104,8 @@ public class StorageService {
             // Trả về objectName (format: folder/{byUser}/{UUID}.ext)
             return objectName;
         } catch (Exception e) {
-            throw new RuntimeException("Lỗi khi upload file lên MinIO: " + e.getMessage(), e);
+            log.error("Failed to upload file to storage: {}", objectName, e);
+            throw new StorageException("Unable to upload file", e);
         }
     }
 
@@ -143,7 +149,8 @@ public class StorageService {
 
             return new PresignResponse(uploadUrl, objectKey, objectKey, PRESIGN_EXPIRY_SECONDS);
         } catch (Exception e) {
-            throw new RuntimeException("Lỗi khi tạo presigned URL: " + e.getMessage(), e);
+            log.error("Failed to generate presigned URL for object: {}", objectKey, e);
+            throw new StorageException("Unable to generate file URL", e);
         }
     }
 
@@ -156,10 +163,7 @@ public class StorageService {
 
     private void validateContentType(String contentType) {
         if (contentType == null || !ALLOWED_CONTENT_TYPES.contains(contentType.toLowerCase())) {
-            throw new IllegalArgumentException(
-                    "Content type không được hỗ trợ: " + contentType
-                            + ". Chỉ chấp nhận: " + ALLOWED_CONTENT_TYPES
-            );
+            throw new BadRequestException("Unsupported content type. Allowed: image/jpeg, image/png, image/webp, image/gif, video/mp4, video/quicktime, video/webm");
         }
     }
 
@@ -182,7 +186,7 @@ public class StorageService {
             );
         } catch (Exception e) {
             // Ghi log cảnh báo nếu xóa lỗi, không làm gián đoạn luồng chính
-            System.err.println("Không thể xóa file MinIO: " + e.getMessage());
+            log.warn("Unable to delete file from storage: {}", fileUrl, e);
         }
     }
 }

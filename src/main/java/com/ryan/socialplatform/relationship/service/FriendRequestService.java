@@ -1,10 +1,15 @@
 package com.ryan.socialplatform.relationship.service;
 
+import com.ryan.socialplatform.common.exception.BadRequestException;
+import com.ryan.socialplatform.common.exception.ConflictException;
+import com.ryan.socialplatform.common.exception.ForbiddenException;
+import com.ryan.socialplatform.common.exception.ResourceNotFoundException;
 import com.ryan.socialplatform.relationship.dto.*;
 import com.ryan.socialplatform.relationship.entity.FriendRequest;
 import com.ryan.socialplatform.relationship.entity.Friendship;
 import com.ryan.socialplatform.relationship.entity.UserBlock;
 import com.ryan.socialplatform.relationship.enums.FriendRequestStatus;
+import com.ryan.socialplatform.relationship.exceptions.FriendRequestNotFoundException;
 import com.ryan.socialplatform.relationship.repository.FriendRequestRepository;
 import com.ryan.socialplatform.relationship.repository.FriendshipRepository;
 import com.ryan.socialplatform.relationship.repository.UserBlockRepository;
@@ -53,19 +58,19 @@ public class FriendRequestService {
     @Transactional
     public FriendRequestResponse send(UUID targetUserId, UUID currentUserId) {
         if (currentUserId.equals(targetUserId)) {
-            throw new IllegalStateException("Cannot send friend request to yourself");
+            throw new BadRequestException("Cannot send a friend request to yourself");
         }
         if (userBlockRepository.existsBlockBetween(currentUserId, targetUserId)) {
-            throw new IllegalStateException("Cannot send friend request to this user");
+            throw new ForbiddenException("Cannot send a friend request to this user");
         }
         if (friendshipRepository.areFriends(currentUserId, targetUserId)) {
-            throw new IllegalStateException("You are already friends with this user");
+            throw new ConflictException("You are already friends with this user");
         }
 
         UserProfile senderProfile = userProfileRepository.findById(currentUserId)
-                .orElseThrow(() -> new UserNotFoundException(currentUserId));
+                .orElseThrow(UserNotFoundException::new);
         UserProfile receiverProfile = userProfileRepository.findById(targetUserId)
-                .orElseThrow(() -> new UserNotFoundException(targetUserId));
+                .orElseThrow(UserNotFoundException::new);
         User sender = senderProfile.getUser();
         User receiver = receiverProfile.getUser();
 
@@ -80,16 +85,16 @@ public class FriendRequestService {
                //  case ACCEPTED -> throw new IllegalStateException("You are already friends with this user"); -> Case này bị sai
                 case PENDING -> {
                     if (existing.getSender().getId().equals(currentUserId)) {
-                        throw new IllegalStateException("You have already sent a friend request");
+                        throw new ConflictException("You have already sent a friend request to this user");
                     } else {
-                        throw new IllegalStateException("This user already sent you a friend request. Please respond to it.");
+                        throw new ConflictException("This user has already sent you a friend request. Accept or decline it instead");
                     }
                 }
                 case ACCEPTED, DECLINED, CANCELLED -> {
                     existing.resend(sender, receiver);
                     request = existing;
                 }
-                default -> throw new IllegalStateException("Unexpected friend request status: " + existing.getStatus());
+                default -> throw new IllegalStateException("Unexpected friend request status");
             }
         }
 
@@ -97,7 +102,7 @@ public class FriendRequestService {
             FriendRequest saved = friendRequestRepository.saveAndFlush(request);
             return FriendRequestResponse.of(saved, senderProfile, receiverProfile);
         } catch (DataIntegrityViolationException ex) {
-            throw new IllegalStateException("A friend request already exists between you and this user");
+            throw new ConflictException("A friend request already exists between you and this user");
         }
     }
 
@@ -107,13 +112,13 @@ public class FriendRequestService {
     @Transactional
     public void cancel(UUID requestId, UUID currentUserId) {
         FriendRequest request = friendRequestRepository.findById(requestId)
-                .orElseThrow(() -> new IllegalArgumentException("Friend request not found"));
+                .orElseThrow(FriendRequestNotFoundException::new);
 
         if (!request.getSender().getId().equals(currentUserId)) {
-            throw new IllegalStateException("You can only cancel your own friend requests");
+            throw new ForbiddenException("You can only cancel your own friend requests");
         }
         if (request.getStatus() != FriendRequestStatus.PENDING) {
-            throw new IllegalStateException("Only pending requests can be cancelled");
+            throw new ConflictException("Only pending requests can be cancelled");
         }
         request.cancel();
     }
@@ -125,13 +130,13 @@ public class FriendRequestService {
     @Transactional
     public FriendRequestResponse accept(UUID requestId, UUID currentUserId) {
         FriendRequest request = friendRequestRepository.findById(requestId)
-                .orElseThrow(() -> new IllegalArgumentException("Friend request not found"));
+                .orElseThrow(FriendRequestNotFoundException::new);
 
         if (!request.getReceiver().getId().equals(currentUserId)) {
-            throw new IllegalStateException("You can only accept requests sent to you");
+            throw new ForbiddenException("You can only accept requests sent to you");
         }
         if (request.getStatus() != FriendRequestStatus.PENDING) {
-            throw new IllegalStateException("Only pending requests can be accepted");
+            throw new ConflictException("Only pending requests can be accepted");
         }
 
         request.accept();
@@ -141,9 +146,9 @@ public class FriendRequestService {
         friendshipRepository.save(friendship);
 
         UserProfile senderProfile = userProfileRepository.findById(request.getSender().getId())
-                .orElseThrow(() -> new UserNotFoundException(request.getSender().getId()));
+                .orElseThrow(UserNotFoundException::new);
         UserProfile receiverProfile = userProfileRepository.findById(currentUserId)
-                .orElseThrow(() -> new UserNotFoundException(currentUserId));
+                .orElseThrow(UserNotFoundException::new);
 
         return FriendRequestResponse.of(request, senderProfile, receiverProfile);
     }
@@ -154,21 +159,21 @@ public class FriendRequestService {
     @Transactional
     public FriendRequestResponse decline(UUID requestId, UUID currentUserId) {
         FriendRequest request = friendRequestRepository.findById(requestId)
-                .orElseThrow(() -> new IllegalArgumentException("Friend request not found"));
+                .orElseThrow(FriendRequestNotFoundException::new);
 
         if (!request.getReceiver().getId().equals(currentUserId)) {
-            throw new IllegalStateException("You can only decline requests sent to you");
+            throw new ForbiddenException("You can only decline requests sent to you");
         }
         if (request.getStatus() != FriendRequestStatus.PENDING) {
-            throw new IllegalStateException("Only pending requests can be declined");
+            throw new ConflictException("Only pending requests can be declined");
         }
 
         request.decline();
 
         UserProfile senderProfile = userProfileRepository.findById(request.getSender().getId())
-                .orElseThrow(() -> new UserNotFoundException(request.getSender().getId()));
+                .orElseThrow(UserNotFoundException::new);
         UserProfile receiverProfile = userProfileRepository.findById(currentUserId)
-                .orElseThrow(() -> new UserNotFoundException(currentUserId));
+                .orElseThrow(UserNotFoundException::new);
 
         return FriendRequestResponse.of(request, senderProfile, receiverProfile);
     }
@@ -205,7 +210,7 @@ public class FriendRequestService {
     @Transactional
     public void unfriend(UUID targetUserId, UUID currentUserId) {
         Friendship friendship = friendshipRepository.findBetweenUsers(currentUserId, targetUserId)
-                .orElseThrow(() -> new IllegalStateException("You are not friends with this user"));
+                .orElseThrow(() -> new ResourceNotFoundException("You are not friends with this user"));
         friendshipRepository.delete(friendship);
     }
 
@@ -261,10 +266,10 @@ public class FriendRequestService {
     @Transactional
     public UserBlockResponse block(UUID targetUserId, UUID currentUserId) {
         if (currentUserId.equals(targetUserId)) {
-            throw new IllegalStateException("Cannot block yourself");
+            throw new BadRequestException("Cannot block yourself");
         }
         if (userBlockRepository.existsByBlockerIdAndBlockedId(currentUserId, targetUserId)) {
-            throw new IllegalStateException("You have already blocked this user");
+            throw new ConflictException("You have already blocked this user");
         }
 
         // Hủy bất kỳ lời mời kết bạn nào đang PENDING giữa 2 người
@@ -277,9 +282,9 @@ public class FriendRequestService {
                 .ifPresent(friendshipRepository::delete);
 
         UserProfile blockerProfile = userProfileRepository.findById(currentUserId)
-                .orElseThrow(() -> new UserNotFoundException(currentUserId));
+                .orElseThrow(UserNotFoundException::new);
         UserProfile blockedProfile = userProfileRepository.findById(targetUserId)
-                .orElseThrow(() -> new UserNotFoundException(targetUserId));
+                .orElseThrow(UserNotFoundException::new);
 
         UserBlock block = new UserBlock(blockerProfile.getUser(), blockedProfile.getUser());
         UserBlock saved = userBlockRepository.save(block);
@@ -292,7 +297,7 @@ public class FriendRequestService {
     @Transactional
     public void unblock(UUID targetUserId, UUID currentUserId) {
         UserBlock block = userBlockRepository.findByBlockerIdAndBlockedId(currentUserId, targetUserId)
-                .orElseThrow(() -> new IllegalStateException("You have not blocked this user"));
+                .orElseThrow(() -> new ResourceNotFoundException("Block record not found"));
         userBlockRepository.delete(block);
     }
 

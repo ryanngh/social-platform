@@ -3,6 +3,7 @@ package com.ryan.socialplatform.user.service;
 import com.ryan.socialplatform.auth.exceptions.AccountAlreadyExistsException;
 import com.ryan.socialplatform.auth.repository.UserCredentialsRepository;
 import com.ryan.socialplatform.auth.repository.UserSessionRepository;
+import com.ryan.socialplatform.common.exception.BadRequestException;
 import com.ryan.socialplatform.storage.StorageService;
 import com.ryan.socialplatform.user.dto.UserAccountResponse;
 import com.ryan.socialplatform.user.dto.UserProfileUpdateRequest;
@@ -11,6 +12,7 @@ import com.ryan.socialplatform.user.entity.User;
 import com.ryan.socialplatform.user.entity.UserCredentials;
 import com.ryan.socialplatform.user.entity.UserProfile;
 import com.ryan.socialplatform.user.enums.Status;
+import com.ryan.socialplatform.user.exceptions.AccountStatusException;
 import com.ryan.socialplatform.user.exceptions.UserNotFoundException;
 import com.ryan.socialplatform.user.repository.UserAppRoleRepository;
 import com.ryan.socialplatform.user.repository.UserProfileRepository;
@@ -52,10 +54,10 @@ public class UserService {
     @Transactional(readOnly = true)
     public UserResponse getProfile(UUID userId, UUID viewerId) {
         UserResponse response = userRepository.findProfileByIdAndViewer(userId, viewerId)
-                .orElseThrow(() -> new UserNotFoundException(userId));
+                .orElseThrow(UserNotFoundException::new);
 
         if (response.status() == Status.DELETED) {
-            throw new UserNotFoundException(userId);
+            throw new UserNotFoundException();
         }
 
         return response;
@@ -69,13 +71,13 @@ public class UserService {
     @Transactional(readOnly = true)
     public UserResponse getProfileByUsername(String username, UUID viewerId) {
         if (username == null || username.isBlank()) {
-            throw new IllegalArgumentException("Username must not be empty");
+            throw new BadRequestException("Username must not be empty");
         }
         UserResponse response = userRepository.findProfileByUsernameAndViewer(username.trim(), viewerId)
-                .orElseThrow(() -> new UserNotFoundException("User not found with username: " + username));
+                .orElseThrow(UserNotFoundException::new);
 
         if (response.status() == Status.DELETED) {
-            throw new UserNotFoundException("User not found with username: " + username);
+            throw new UserNotFoundException();
         }
 
         return response;
@@ -94,10 +96,10 @@ public class UserService {
     @Transactional
     public UserResponse updateProfile(UUID userId, UserProfileUpdateRequest request) {
         UserProfile profile = userProfileRepository.findById(userId)
-                .orElseThrow(() -> new UserNotFoundException(userId));
+                .orElseThrow(UserNotFoundException::new);
 
         if (profile.getUser().getStatus() == Status.DELETED) {
-            throw new UserNotFoundException(userId);
+            throw new UserNotFoundException();
         }
 
         // Bắt buộc — @NotBlank đảm bảo luôn có giá trị, set thẳng an toàn
@@ -152,7 +154,7 @@ public class UserService {
     @Transactional(readOnly = true)
     public UserAccountResponse getAccountInfo(UUID userId) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new UserNotFoundException(userId));
+                .orElseThrow(UserNotFoundException::new);
 
         UserCredentials credentials = userCredentialsRepository.findById(userId)
                 .orElse(null);
@@ -167,10 +169,10 @@ public class UserService {
     @Transactional
     public UserAccountResponse deactivateAccount(UUID currentUserId) {
         User user = userRepository.findById(currentUserId)
-                .orElseThrow(() -> new UserNotFoundException(currentUserId));
+                .orElseThrow(UserNotFoundException::new);
 
         if (user.getStatus() != Status.ACTIVE) {
-            throw new IllegalStateException("Only active accounts can be deactivated. Current status: " + user.getStatus());
+            throw new AccountStatusException("Only active accounts can be deactivated");
         }
 
         user.setStatus(Status.DEACTIVATED);
@@ -184,7 +186,7 @@ public class UserService {
     @Transactional
     public void deleteAccount(UUID currentUserId) {
         User user = userRepository.findById(currentUserId)
-                .orElseThrow(() -> new UserNotFoundException(currentUserId));
+                .orElseThrow(UserNotFoundException::new);
 
         if (user.getStatus() == Status.DELETED) {
             return;
@@ -204,14 +206,14 @@ public class UserService {
     @Transactional
     public UserAccountResponse suspendUser(UUID targetUserId, UUID operatorId) {
         if (targetUserId.equals(operatorId)) {
-            throw new IllegalArgumentException("You cannot suspend your own account");
+            throw new BadRequestException("You cannot suspend your own account");
         }
 
         User user = userRepository.findById(targetUserId)
-                .orElseThrow(() -> new UserNotFoundException(targetUserId));
+                .orElseThrow(UserNotFoundException::new);
 
         if (user.getStatus() == Status.DELETED) {
-            throw new IllegalStateException("Cannot suspend a deleted account");
+            throw new AccountStatusException("Cannot suspend a deleted account");
         }
 
         user.setStatus(Status.SUSPENDED);
@@ -225,10 +227,10 @@ public class UserService {
     @Transactional
     public UserAccountResponse reactivateUser(UUID targetUserId) {
         User user = userRepository.findById(targetUserId)
-                .orElseThrow(() -> new UserNotFoundException(targetUserId));
+                .orElseThrow(UserNotFoundException::new);
 
         if (user.getStatus() == Status.DELETED) {
-            throw new IllegalStateException("Cannot reactivate a deleted account");
+            throw new AccountStatusException("Cannot reactivate a deleted account");
         }
 
         user.setStatus(Status.ACTIVE);
@@ -249,10 +251,10 @@ public class UserService {
         validateImageFile(file);
 
         UserProfile profile = userProfileRepository.findById(userId)
-                .orElseThrow(() -> new UserNotFoundException(userId));
+                .orElseThrow(UserNotFoundException::new);
 
         if (profile.getUser().getStatus() == Status.DELETED) {
-            throw new UserNotFoundException(userId);
+            throw new UserNotFoundException();
         }
 
 /*
@@ -282,10 +284,10 @@ public class UserService {
         validateImageFile(file);
 
         UserProfile profile = userProfileRepository.findById(userId)
-                .orElseThrow(() -> new UserNotFoundException(userId));
+                .orElseThrow(UserNotFoundException::new);
 
         if (profile.getUser().getStatus() == Status.DELETED) {
-            throw new UserNotFoundException(userId);
+            throw new UserNotFoundException();
         }
 
        /* String oldBannerUrl = profile.getBannerUrl();*/
@@ -319,13 +321,13 @@ public class UserService {
 
     private void validateImageFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
-            throw new IllegalArgumentException("File upload must not be empty.");
+            throw new BadRequestException("File upload must not be empty.");
         }
 
         // Giới hạn dung lượng tối đa 25MB
         long maxSizeBytes = 25 * 1024 * 1024;
         if (file.getSize() > maxSizeBytes) {
-            throw new IllegalArgumentException("File size exceeds the allowed limit (maximum 25 MB)");
+            throw new BadRequestException("File size exceeds the allowed limit (maximum 25 MB)");
         }
 
         // 1. Kiểm tra extension từ file name
@@ -349,7 +351,7 @@ public class UserService {
 
         // Cho phép nếu đuôi file hợp lệ HOẶC MIME type hợp lệ
         if (!isValidExt && !isValidMime) {
-            throw new IllegalArgumentException("Only image files are allowed (JPEG, PNG, WEBP, GIF)");
+            throw new BadRequestException("Only image files are allowed (JPEG, PNG, WEBP, GIF)");
         }
     }
 }

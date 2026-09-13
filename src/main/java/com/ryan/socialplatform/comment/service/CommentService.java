@@ -5,12 +5,16 @@ import com.ryan.socialplatform.comment.entity.Comment;
 import com.ryan.socialplatform.comment.entity.CommentMedia;
 import com.ryan.socialplatform.comment.entity.CommentMention;
 import com.ryan.socialplatform.comment.enums.CommentSortBy;
+import com.ryan.socialplatform.comment.exceptions.CommentNotFoundException;
 import com.ryan.socialplatform.comment.repository.CommentMediaRepository;
 import com.ryan.socialplatform.comment.repository.CommentMentionRepository;
 import com.ryan.socialplatform.comment.repository.CommentRepository;
+import com.ryan.socialplatform.common.exception.BadRequestException;
+import com.ryan.socialplatform.common.exception.ForbiddenException;
 import com.ryan.socialplatform.relationship.repository.FriendshipRepository;
 import com.ryan.socialplatform.relationship.repository.UserBlockRepository;
 import com.ryan.socialplatform.post.entity.Post;
+import com.ryan.socialplatform.post.exceptions.PostNotFoundException;
 import com.ryan.socialplatform.post.repository.PostRepository;
 import com.ryan.socialplatform.user.dto.UserSummaryResponse;
 import com.ryan.socialplatform.user.entity.User;
@@ -58,20 +62,18 @@ public class CommentService {
         boolean hasMedia = request.media() != null && !request.media().isEmpty();
 
         if (!hasContent && !hasMedia) {
-            throw new IllegalArgumentException("Comment must contain content or media");
-            // TODO: CommentContentRequiredException
+            throw new BadRequestException("Comment must contain text content or media");
         }
 
         // 2. Visibility & Block
-        Post post = postRepository.findByIdAndDeletedAtIsNull(postId).orElseThrow(() -> new IllegalArgumentException("Post with id " + postId + " does not exist"));
-        // TODO: PostNotFoundException
+        Post post = postRepository.findByIdAndDeletedAtIsNull(postId)
+                .orElseThrow(PostNotFoundException::new);
 
         UUID authorId = post.getAuthor().getId();
 
         // Không cho comment nếu đang block nhau
         if (!currentUserId.equals(authorId) && userBlockRepository.existsBlockBetween(currentUserId, authorId)) {
-            throw new IllegalArgumentException("You cannot comment on this post");
-            // TODO: UserBlockedException
+            throw new ForbiddenException("You are blocked from interacting with this post");
         }
 
         switch (post.getVisibility()) {
@@ -81,7 +83,7 @@ public class CommentService {
 
             case FRIENDS -> {
                 if (!currentUserId.equals(authorId) && !friendshipRepository.areFriends(currentUserId, authorId)) {
-                    throw new IllegalArgumentException("You must be friends with the post author to comment");
+                    throw new ForbiddenException("This post is only visible to the author's friends");
                 }
             }
 
@@ -91,7 +93,7 @@ public class CommentService {
 
             case PRIVATE -> {
                 if (!currentUserId.equals(authorId)) {
-                    throw new IllegalArgumentException("You cannot comment on this post");
+                    throw new ForbiddenException("This post is private");
                 }
             }
         }
@@ -100,7 +102,8 @@ public class CommentService {
         List<UserProfile> taggedProfiles = validateAndGetTaggedProfiles(currentUserId, request.mentionedUserIds());
 
         // 4. Get current user's profile
-        UserProfile authorProfile = userProfileRepository.findById(currentUserId).orElseThrow(() -> new UserNotFoundException(currentUserId));
+        UserProfile authorProfile = userProfileRepository.findById(currentUserId)
+                .orElseThrow(UserNotFoundException::new);
 
         User author = authorProfile.getUser();
 
@@ -144,23 +147,22 @@ public class CommentService {
         boolean hasMedia = request.media() != null && !request.media().isEmpty();
 
         if (!hasContent && !hasMedia) {
-            throw new IllegalArgumentException("Comment must contain content or media");
-            // TODO: CommentContentRequiredException
+            throw new BadRequestException("Reply must contain text content or media");
         }
 
         // 2. Find target comment
         Comment targetComment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
-                .orElseThrow(() -> new IllegalArgumentException("Comment with id " + commentId + " does not exist"));
+                .orElseThrow(CommentNotFoundException::new);
 
         // 3. Find Post & Check Visibility / Block
         Post post = postRepository.findByIdAndDeletedAtIsNull(targetComment.getPost().getId())
-                .orElseThrow(() -> new IllegalArgumentException("Post does not exist or has been deleted"));
+                .orElseThrow(PostNotFoundException::new);
 
         UUID postAuthorId = post.getAuthor().getId();
 
         // Không cho comment nếu đang block nhau với chủ post
         if (!currentUserId.equals(postAuthorId) && userBlockRepository.existsBlockBetween(currentUserId, postAuthorId)) {
-            throw new IllegalArgumentException("You cannot comment on this post");
+            throw new ForbiddenException("You are blocked from interacting with this post");
         }
 
         switch (post.getVisibility()) {
@@ -168,7 +170,7 @@ public class CommentService {
             }
             case FRIENDS -> {
                 if (!currentUserId.equals(postAuthorId) && !friendshipRepository.areFriends(currentUserId, postAuthorId)) {
-                    throw new IllegalArgumentException("You must be friends with the post author to comment");
+                    throw new ForbiddenException("This post is only visible to the author's friends");
                 }
             }
             case CLOSE_FRIENDS -> {
@@ -176,7 +178,7 @@ public class CommentService {
             }
             case PRIVATE -> {
                 if (!currentUserId.equals(postAuthorId)) {
-                    throw new IllegalArgumentException("You cannot comment on this post");
+                    throw new ForbiddenException("This post is private");
                 }
             }
         }
@@ -197,7 +199,7 @@ public class CommentService {
 
             // Kiểm tra comment gốc có bị xóa hay chưa
             if (actualParent == null || actualParent.isDeleted()) {
-                throw new IllegalArgumentException("Parent comment has been deleted");
+                throw new CommentNotFoundException("The parent comment has been deleted");
             }
 
             // Tự động tag tác giả của reply con (nếu có author và không tự tag chính mình)
@@ -213,7 +215,7 @@ public class CommentService {
 
         // 6. Lấy profile tác giả viết reply (current user) và profile người được reply (replyToUser)
         UserProfile authorProfile = userProfileRepository.findById(currentUserId)
-                .orElseThrow(() -> new UserNotFoundException(currentUserId));
+                .orElseThrow(UserNotFoundException::new);
         User author = authorProfile.getUser();
 
         UserProfile replyToProfile = null;
@@ -284,11 +286,11 @@ public class CommentService {
     public Slice<CommentResponse> getPostComments(UUID currentUserId, UUID postId, CommentSortBy sortBy, Pageable pageable) {
         // 1. PERMISSION & VISIBILITY
         Post post = postRepository.findByIdAndDeletedAtIsNull(postId)
-                .orElseThrow(() -> new IllegalArgumentException("Post does not exist or has been deleted"));
+                .orElseThrow(PostNotFoundException::new);
         UUID postAuthorId = post.getAuthor().getId();
 
         if (!currentUserId.equals(postAuthorId) && userBlockRepository.existsBlockBetween(currentUserId, postAuthorId)) {
-            throw new IllegalArgumentException("You cannot comment on this post");
+            throw new ForbiddenException("You are blocked from interacting with this post");
         }
 
         switch (post.getVisibility()) {
@@ -296,7 +298,7 @@ public class CommentService {
             }
             case FRIENDS -> {
                 if (!currentUserId.equals(postAuthorId) && !friendshipRepository.areFriends(currentUserId, postAuthorId)) {
-                    throw new IllegalArgumentException("You must be friends with the post author to comment");
+                    throw new ForbiddenException("This post is only visible to the author's friends");
                 }
             }
             case CLOSE_FRIENDS -> {
@@ -304,7 +306,7 @@ public class CommentService {
             }
             case PRIVATE -> {
                 if (!currentUserId.equals(postAuthorId)) {
-                    throw new IllegalArgumentException("You cannot comment on this post");
+                    throw new ForbiddenException("This post is private");
                 }
             }
         }
@@ -435,13 +437,13 @@ public class CommentService {
     @Transactional(readOnly = true)
     public Slice<ReplyResponse> getCommentReplies(UUID currentUserId, UUID commentId, Pageable pageable) {
         Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
-                .orElseThrow(() -> new IllegalArgumentException("comment not found"));
+                .orElseThrow(CommentNotFoundException::new);
         Post post = postRepository.findByIdAndDeletedAtIsNull(comment.getPost().getId())
-                .orElseThrow(() -> new IllegalArgumentException("Post does not exist or has been deleted"));
+                .orElseThrow(PostNotFoundException::new);
         UUID postAuthorId = post.getAuthor().getId();
 
         if (!currentUserId.equals(postAuthorId) && userBlockRepository.existsBlockBetween(currentUserId, postAuthorId)) {
-            throw new IllegalArgumentException("You cannot comment on this post");
+            throw new ForbiddenException("You are blocked from interacting with this post");
         }
 
         switch (post.getVisibility()) {
@@ -449,7 +451,7 @@ public class CommentService {
             }
             case FRIENDS -> {
                 if (!currentUserId.equals(postAuthorId) && !friendshipRepository.areFriends(currentUserId, postAuthorId)) {
-                    throw new IllegalArgumentException("You must be friends with the post author to view comments");
+                    throw new ForbiddenException("This post is only visible to the author's friends");
                 }
             }
             case CLOSE_FRIENDS -> {
@@ -457,7 +459,7 @@ public class CommentService {
             }
             case PRIVATE -> {
                 if (!currentUserId.equals(postAuthorId)) {
-                    throw new IllegalArgumentException("You cannot view comments on this post");
+                    throw new ForbiddenException("This post is private");
                 }
             }
         }
@@ -565,8 +567,7 @@ public class CommentService {
     @Transactional
     public CommentResponse updateComment(UUID currentUserId, UUID commentId, UpdateCommentRequest request) {
         Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
-                .orElseThrow(() -> new IllegalArgumentException(""));
-        //TODO
+                .orElseThrow(CommentNotFoundException::new);
 
         UUID authorId = comment.getAuthor() != null ? comment.getAuthor().getId() : null;
         if (authorId == null || !authorId.equals(currentUserId)) {
@@ -577,10 +578,10 @@ public class CommentService {
         boolean hasContent = request.content() != null && !request.content().isBlank();
         boolean hasMedia = request.media() != null && !request.media().isEmpty();
         if (!hasContent && !hasMedia) {
-            throw new IllegalArgumentException("Comment must contain content or media");
+            throw new BadRequestException("Comment must contain text content or media");
         }
         if (hasContent && request.content().length() > 10000) {
-            throw new IllegalArgumentException("Comment content must not exceed 10000 characters");
+            throw new BadRequestException("Comment content must not exceed 10,000 characters");
         }
 
         // Update entity
@@ -619,7 +620,7 @@ public class CommentService {
         }
 
         UserProfile authorProfile = userProfileRepository.findById(currentUserId)
-                .orElseThrow(() -> new UserNotFoundException(currentUserId));
+                .orElseThrow(UserNotFoundException::new);
 
         UUID postAuthorId = comment.getPost().getAuthor().getId();
         return toCommentResponse(comment, authorProfile, mediaResponses, mentionResponses, currentUserId, postAuthorId);
@@ -632,7 +633,7 @@ public class CommentService {
     @Transactional
     public void deleteComment(UUID currentUserId, UUID commentId) {
         Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
-                .orElseThrow(() -> new IllegalArgumentException("Comment with id " + commentId + " does not exist or has already been deleted"));
+                .orElseThrow(CommentNotFoundException::new);
 
         UUID commentAuthorId = comment.getAuthor() != null ? comment.getAuthor().getId() : null;
         UUID postAuthorId = comment.getPost().getAuthor().getId();
@@ -660,7 +661,7 @@ public class CommentService {
     @Transactional
     public CommentResponse pinComment(UUID currentUserId, UUID commentId) {
         Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
-                .orElseThrow(() -> new IllegalArgumentException("Comment with id " + commentId + " does not exist or has been deleted"));
+                .orElseThrow(CommentNotFoundException::new);
 
         UUID postAuthorId = comment.getPost().getAuthor().getId();
         if (currentUserId == null || !currentUserId.equals(postAuthorId)) {
@@ -668,7 +669,7 @@ public class CommentService {
         }
 
         if (!comment.isTopLevel()) {
-            throw new IllegalArgumentException("Only top-level comments can be pinned");
+            throw new BadRequestException("Only top-level comments can be pinned");
         }
 
         if (comment.isPinned()) {
@@ -692,7 +693,7 @@ public class CommentService {
     @Transactional
     public CommentResponse unpinComment(UUID currentUserId, UUID commentId) {
         Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
-                .orElseThrow(() -> new IllegalArgumentException("Comment with id " + commentId + " does not exist or has been deleted"));
+                .orElseThrow(CommentNotFoundException::new);
 
         UUID postAuthorId = comment.getPost().getAuthor().getId();
         if (currentUserId == null || !currentUserId.equals(postAuthorId)) {
@@ -714,12 +715,12 @@ public class CommentService {
     public CommentResponse getCommentById(UUID currentUserId, UUID commentId) {
         // 1.
         Comment comment = commentRepository.findByIdAndDeletedAtIsNull(commentId)
-                .orElseThrow(() -> new IllegalArgumentException("commentId"));
+                .orElseThrow(CommentNotFoundException::new);
 
         // 2.
         Post post = comment.getPost();
         if (post.isDeleted()) {
-            throw new IllegalArgumentException("commentId"); // Bài viết bị xóa thì comment cũng coi như không tìm thấy
+            throw new CommentNotFoundException(); // Bài viết bị xóa thì comment cũng coi như không tìm thấy
         }
 
         UUID postAuthorId = post.getAuthor().getId();
@@ -919,7 +920,7 @@ public class CommentService {
             Set<UUID> foundIds = profiles.stream().map(UserProfile::getUserId).collect(Collectors.toSet());
             for (UUID requestedId : uniqueIds) {
                 if (!foundIds.contains(requestedId)) {
-                    throw new UserNotFoundException(requestedId);
+                    throw new UserNotFoundException();
                 }
             }
         }
@@ -927,7 +928,7 @@ public class CommentService {
         // 3. Kiểm tra quan hệ chặn (Block 2 chiều)
         for (UserProfile profile : profiles) {
             if (userBlockRepository.existsBlockBetween(currentUserId, profile.getUserId())) {
-                throw new IllegalStateException("Cannot tag user with id: " + profile.getUserId() + " due to block restrictions");
+                throw new ForbiddenException("Cannot tag this user due to block restrictions");
             }
         }
 

@@ -1,8 +1,12 @@
 package com.ryan.socialplatform.post.service;
 
+import com.ryan.socialplatform.common.exception.BadRequestException;
+import com.ryan.socialplatform.common.exception.ConflictException;
+import com.ryan.socialplatform.common.exception.ForbiddenException;
 import com.ryan.socialplatform.post.dto.*;
 import com.ryan.socialplatform.post.entity.*;
 import com.ryan.socialplatform.post.enums.PostVisibility;
+import com.ryan.socialplatform.post.exceptions.PostNotFoundException;
 import com.ryan.socialplatform.post.repository.*;
 import com.ryan.socialplatform.relationship.repository.FriendshipRepository;
 import com.ryan.socialplatform.relationship.repository.UserBlockRepository;
@@ -62,11 +66,11 @@ public class PostService {
         boolean hasMedia = request.media() != null && !request.media().isEmpty();
 
         if (!hasContent && !hasMedia) {
-            throw new IllegalArgumentException("Post must contain at least text content or media");
+            throw new BadRequestException("Post must contain at least text content or media");
         }
         // Lấy Profile của tác giả (chứa cả entity User và avatar, tên hiển thị)
         UserProfile authorProfile = userProfileRepository.findById(currentUserId)
-                .orElseThrow(() -> new UserNotFoundException(currentUserId));
+                .orElseThrow(() -> new UserNotFoundException());
         User author = authorProfile.getUser();
 
         // =====================================================================
@@ -148,7 +152,7 @@ public class PostService {
     public PostResponse getPost(UUID currentUserId, UUID postId) {
         //1. check post
         Post post = postRepository.findByIdAndDeletedAtIsNull(postId)
-                .orElseThrow(() -> new IllegalArgumentException("Post with id " + postId + " does not exist"));
+                .orElseThrow(PostNotFoundException::new);
         UUID authorId = post.getAuthor().getId();
 
         //2. check nếu là chính chủ -> return luôn
@@ -157,7 +161,7 @@ public class PostService {
         if (!isAuthor) {
             //3. check user_block
             if (userBlockRepository.existsBlockBetween(currentUserId, authorId)) {
-                throw new IllegalArgumentException();
+                throw new ForbiddenException("You are blocked from viewing this post");
             }
             //4. check visibility
             switch (post.getVisibility()) {
@@ -167,14 +171,14 @@ public class PostService {
                 case FRIENDS -> {
                     boolean areFriends = friendshipRepository.areFriends(currentUserId, authorId);
                     if (!areFriends) {
-                        //TODO: throw new
+                        throw new ForbiddenException("This post is only visible to the author's friends");
                     }
                 }
                 case CLOSE_FRIENDS -> {
                     // TODO: missed module Close Friends
                 }
                 case PRIVATE -> {
-                    // TODO: PostNotFoundException
+                    throw new PostNotFoundException();
                 }
             }
         }
@@ -198,7 +202,7 @@ public class PostService {
     public Slice<PostResponse> getUserPost(UUID targetUserId, UUID currentUserId, Pageable pageable) {
         // check targetUserId
         if (!userProfileRepository.existsById(targetUserId)) {
-            throw new UserNotFoundException(targetUserId);
+            throw new UserNotFoundException();
         }
         // check blockuser
         if (userBlockRepository.existsBlockBetween(currentUserId, targetUserId)) {
@@ -235,11 +239,11 @@ public class PostService {
     public UpdatePostResponse updatePost(UUID currentUserId, UUID postId, UpdatePostRequest request) {
         //1: Kiểm tra post tồn tại và chưa bị soft-delete
         Post post = postRepository.findByIdAndDeletedAtIsNull(postId)
-                .orElseThrow(() -> new IllegalArgumentException("Post with id " + postId + " does not exist"));
+                .orElseThrow(PostNotFoundException::new);
 
         //2: Author check
         if (!post.getAuthor().getId().equals(currentUserId)) {
-            throw new IllegalStateException("You are not authorized to update this post");
+            throw new ForbiddenException("Only the author can update this post");
         }
 
         // 3.1: check final content
@@ -259,7 +263,7 @@ public class PostService {
         }
 
         if (!willHaveContent && !willHaveMedia) {
-            throw new IllegalArgumentException("Post must contain at least text content or media");
+            throw new BadRequestException("Post must contain at least text content or media");
         }
 
         //4: update Entity Post (content & visibility)
@@ -347,7 +351,7 @@ public class PostService {
 
         // BƯỚC 8: Lấy Profile Tác giả & trả về UpdatePostResponse
         UserProfile authorProfile = userProfileRepository.findById(currentUserId)
-                .orElseThrow(() -> new UserNotFoundException(currentUserId));
+                .orElseThrow(() -> new UserNotFoundException());
 
         return UpdatePostResponse.of(
                 post,
@@ -365,11 +369,11 @@ public class PostService {
     public void deletePost(UUID currentUserId, UUID postId) {
         // 1. Kiểm tra bài viết tồn tại và chưa bị xóa mềm
         Post post = postRepository.findByIdAndDeletedAtIsNull(postId)
-                .orElseThrow(() -> new IllegalArgumentException("Post with id " + postId + " does not exist"));
+                .orElseThrow(PostNotFoundException::new);
 
         // 2. Kiểm tra quyền sở hữu (Chỉ tác giả mới có quyền xóa bài viết)
         if (!post.getAuthor().getId().equals(currentUserId)) {
-            throw new IllegalStateException("You are not authorized to delete this post");
+            throw new ForbiddenException("Only the author can delete this post");
         }
 
         // 3. Thực hiện xóa mềm
@@ -383,16 +387,16 @@ public class PostService {
     public void restorePost(UUID currentUserId, UUID postId) {
         // 1. Tìm bài viết theo ID (kể cả đã bị xóa mềm)
         Post post = postRepository.findById(postId)
-                .orElseThrow(() -> new IllegalArgumentException("Post with id " + postId + " does not exist"));
+                .orElseThrow(PostNotFoundException::new);
 
         // 2. Kiểm tra quyền sở hữu
         if (!post.getAuthor().getId().equals(currentUserId)) {
-            throw new IllegalStateException("You are not authorized to restore this post");
+            throw new ForbiddenException("Only the author can restore this post");
         }
 
         // 3. Kiểm tra xem bài viết có đang trong trạng thái bị xóa không
         if (!post.isDeleted()) {
-            throw new IllegalStateException("Post is not deleted");
+            throw new ConflictException("This post is not in a deleted state");
         }
 
         // 4. Khôi phục bài viết
@@ -522,7 +526,7 @@ public class PostService {
         Set<UUID> uniqueIds = new HashSet<>(rawTaggedIds);
         // 2. Không cho phép tự tag chính mình
         if (uniqueIds.contains(currentUserId)) {
-            throw new IllegalArgumentException("You cannot tag yourself in a post");
+            throw new BadRequestException("You cannot tag yourself in a post");
         }
         // 3. Batch query kiểm tra sự tồn tại trong DB (1 query duy nhất)
         List<UserProfile> profiles = userProfileRepository.findAllById(uniqueIds);
@@ -532,14 +536,14 @@ public class PostService {
                     .collect(Collectors.toSet());
             for (UUID requestedId : uniqueIds) {
                 if (!foundIds.contains(requestedId)) {
-                    throw new UserNotFoundException(requestedId);
+                    throw new UserNotFoundException();
                 }
             }
         }
         // 4. Kiểm tra quan hệ chặn (Block 2 chiều)
         for (UserProfile profile : profiles) {
             if (userBlockRepository.existsBlockBetween(currentUserId, profile.getUserId())) {
-                throw new IllegalStateException("Cannot tag user with id: " + profile.getUserId() + " due to block restrictions");
+                throw new ForbiddenException("Cannot tag this user due to block restrictions");
             }
         }
         return profiles;
