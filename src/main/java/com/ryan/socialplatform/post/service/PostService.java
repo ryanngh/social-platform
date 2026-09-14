@@ -186,14 +186,6 @@ public class PostService {
         return toPostResponse(post);
     }
 
-    /**
-     * Newfeeds
-     */
-    @Transactional(readOnly = true)
-    public Slice<PostResponse> newFeeds(UUID userId, Pageable pageable) {
-        //TODO newFeeds
-        return null;
-    }
 
     /**
      * get user posts (profile)
