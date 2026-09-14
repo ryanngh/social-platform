@@ -19,10 +19,75 @@ import java.util.concurrent.TimeUnit;
 public class StorageService {
     private static final int PRESIGN_EXPIRY_SECONDS = 600; // 10 phút
 
-    private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
-            "image/jpeg", "image/png", "image/webp", "image/gif",
-            "video/mp4", "video/quicktime", "video/webm"
+    // 1. Hình ảnh phổ biến (JPEG, PNG, WebP, GIF, AVIF, HEIC/HEIF của iOS/iPhone, BMP, TIFF, SVG, ICO)
+    private static final Set<String> ALLOWED_IMAGE_TYPES = Set.of(
+            "image/jpeg",
+            "image/jpg",
+            "image/pjpeg",
+            "image/png",
+            "image/x-png",
+            "image/webp",
+            "image/gif",
+            "image/avif",
+            "image/heic",
+            "image/heif",
+            "image/heic-sequence",
+            "image/heif-sequence",
+            "image/bmp",
+            "image/x-ms-bmp",
+            "image/tiff",
+            "image/svg+xml",
+            "image/x-icon",
+            "image/vnd.microsoft.icon"
     );
+
+    // 2. Video phổ biến (MP4, QuickTime/MOV từ iPhone/Mac, WebM, MKV, AVI, MPEG, 3GP, WMV, FLV, TS, OGV)
+    private static final Set<String> ALLOWED_VIDEO_TYPES = Set.of(
+            "video/mp4",
+            "video/x-m4v",
+            "video/quicktime",
+            "video/webm",
+            "video/x-matroska",
+            "video/x-msvideo",
+            "video/avi",
+            "video/mpeg",
+            "video/3gpp",
+            "video/3gpp2",
+            "video/x-ms-wmv",
+            "video/x-flv",
+            "video/mp2t",
+            "video/ogg"
+    );
+
+    /*
+     * 3. Âm thanh phổ biến (Voice message / Audio uploads) - Sẵn sàng mở khi kích hoạt tính năng chat thoại / audio:
+     * private static final Set<String> ALLOWED_AUDIO_TYPES = Set.of(
+     *         "audio/mpeg",
+     *         "audio/mp3",
+     *         "audio/mp4",
+     *         "audio/x-m4a",
+     *         "audio/aac",
+     *         "audio/ogg",
+     *         "audio/opus",
+     *         "audio/wav",
+     *         "audio/x-wav",
+     *         "audio/wave",
+     *         "audio/flac",
+     *         "audio/x-flac",
+     *         "audio/webm",
+     *         "audio/amr"
+     * );
+     */
+
+    private static final Set<String> ALLOWED_CONTENT_TYPES;
+    static {
+        Set<String> types = new java.util.HashSet<>();
+        types.addAll(ALLOWED_IMAGE_TYPES);
+        types.addAll(ALLOWED_VIDEO_TYPES);
+        // Khi cần mở hỗ trợ audio, bỏ comment dòng sau:
+        // types.addAll(ALLOWED_AUDIO_TYPES);
+        ALLOWED_CONTENT_TYPES = java.util.Collections.unmodifiableSet(types);
+    }
 
     private final MinioClient minioClient;
     private final MinioProperties props;
@@ -109,16 +174,53 @@ public class StorageService {
         }
     }
 
-    private String determineContentType(String extension) {
+    public String determineContentType(String extension) {
         if (extension == null || extension.isBlank()) {
             return "application/octet-stream";
         }
         String cleanExt = extension.startsWith(".") ? extension.substring(1).toLowerCase() : extension.toLowerCase();
         return switch (cleanExt) {
+            // Images
             case "jpg", "jpeg" -> "image/jpeg";
             case "png" -> "image/png";
             case "webp" -> "image/webp";
             case "gif" -> "image/gif";
+            case "avif" -> "image/avif";
+            case "heic" -> "image/heic";
+            case "heif" -> "image/heif";
+            case "bmp" -> "image/bmp";
+            case "tiff", "tif" -> "image/tiff";
+            case "svg" -> "image/svg+xml";
+            case "ico" -> "image/x-icon";
+
+            // Videos
+            case "mp4" -> "video/mp4";
+            case "m4v" -> "video/x-m4v";
+            case "mov", "qt" -> "video/quicktime";
+            case "webm" -> "video/webm";
+            case "mkv" -> "video/x-matroska";
+            case "avi" -> "video/x-msvideo";
+            case "mpeg", "mpg", "mpe" -> "video/mpeg";
+            case "3gp" -> "video/3gpp";
+            case "3g2" -> "video/3gpp2";
+            case "wmv" -> "video/x-ms-wmv";
+            case "flv" -> "video/x-flv";
+            case "ts", "mts", "m2ts" -> "video/mp2t";
+            case "ogv" -> "video/ogg";
+
+            /*
+             * Audio (Mở cờ khi kích hoạt tính năng Voice Message / Audio uploads):
+             * case "mp3" -> "audio/mpeg";
+             * case "m4a" -> "audio/mp4";
+             * case "aac" -> "audio/aac";
+             * case "ogg", "oga" -> "audio/ogg";
+             * case "opus" -> "audio/opus";
+             * case "wav" -> "audio/wav";
+             * case "flac" -> "audio/flac";
+             * case "weba" -> "audio/webm";
+             * case "amr" -> "audio/amr";
+             */
+
             default -> "application/octet-stream";
         };
     }
@@ -161,9 +263,13 @@ public class StorageService {
         return fileName.substring(fileName.lastIndexOf("."));
     }
 
-    private void validateContentType(String contentType) {
-        if (contentType == null || !ALLOWED_CONTENT_TYPES.contains(contentType.toLowerCase())) {
-            throw new BadRequestException("Unsupported content type. Allowed: image/jpeg, image/png, image/webp, image/gif, video/mp4, video/quicktime, video/webm");
+    public void validateContentType(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            throw new BadRequestException("Content type must not be blank");
+        }
+        String normalizedType = contentType.split(";")[0].trim().toLowerCase();
+        if (!ALLOWED_CONTENT_TYPES.contains(normalizedType)) {
+            throw new BadRequestException("Unsupported content type: '" + contentType + "'. Only standard image and video formats are allowed.");
         }
     }
 
