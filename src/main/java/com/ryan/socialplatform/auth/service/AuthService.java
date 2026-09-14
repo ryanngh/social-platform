@@ -27,12 +27,14 @@ import com.ryan.socialplatform.user.entity.UserAppRole;
 import com.ryan.socialplatform.user.entity.UserCredentials;
 import com.ryan.socialplatform.user.entity.UserProfile;
 import com.ryan.socialplatform.user.enums.AppRole;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
 
+@Slf4j
 @Service
 public class AuthService {
 
@@ -75,6 +77,7 @@ public class AuthService {
             authentication = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(request.identifier(), request.password()));
         } catch (BadCredentialsException e) {
+            log.warn("Failed login attempt for identifier: {}", request.identifier());
             throw new InvalidCredentialsException();
         }
 
@@ -93,7 +96,10 @@ public class AuthService {
         UserSession session = userSessionRepository.findByRefreshTokenHash(hash)
                 .filter(s -> s.getRevokedAt() == null)
                 .filter(s -> s.getExpiresAt().isAfter(Instant.now()))
-                .orElseThrow(InvalidRefreshTokenException::new);
+                .orElseThrow(() -> {
+                    log.warn("Invalid or revoked refresh token attempt detected");
+                    return new InvalidRefreshTokenException();
+                });
 
         // Rotation: thu hồi session cũ trước khi phát hành session mới
         session.setRevokedAt(Instant.now());
