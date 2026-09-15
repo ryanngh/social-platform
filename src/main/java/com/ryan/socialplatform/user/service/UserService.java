@@ -308,7 +308,10 @@ public class UserService {
     }
 
 
-    private static final Set<String> ALLOWED_IMAGE_EXTENSIONS = Set.of("jpg", "jpeg", "png", "webp", "gif");
+    private static final Set<String> ALLOWED_IMAGE_EXTENSIONS = Set.of(
+            "jpg", "jpeg", "png", "webp", "gif",
+            "avif", "heic", "heif", "bmp"
+    );
     private static final Set<String> ALLOWED_IMAGE_MIME_TYPES = Set.of(
             "image/jpeg",
             "image/png",
@@ -316,7 +319,14 @@ public class UserService {
             "image/gif",
             "image/jpg",
             "image/pjpeg",
-            "image/x-png"
+            "image/x-png",
+            "image/avif",
+            "image/heic",
+            "image/heif",
+            "image/heic-sequence",
+            "image/heif-sequence",
+            "image/bmp",
+            "image/x-ms-bmp"
     );
 
     private void validateImageFile(MultipartFile file) {
@@ -351,7 +361,7 @@ public class UserService {
 
         // Cho phép nếu đuôi file hợp lệ HOẶC MIME type hợp lệ
         if (!isValidExt && !isValidMime) {
-            throw new BadRequestException("Only image files are allowed (JPEG, PNG, WEBP, GIF)");
+            throw new BadRequestException("Only image files are allowed (JPEG, PNG, WEBP, GIF, AVIF, HEIC, HEIF, BMP)");
         }
     }
 }
